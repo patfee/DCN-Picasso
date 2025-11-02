@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial import ConvexHull
 
-# optional concave geometry support
+# Optional concave geometry support (alphashape + shapely)
 try:
     import alphashape
     _HAS_ALPHASHAPE = True
@@ -10,49 +10,65 @@ except Exception:
     alphashape = None
     _HAS_ALPHASHAPE = False
 
-# Limits for performance
+# Performance limits
 MAX_POINTS_FOR_DISPLAY = 15000
 MAX_POINTS_FOR_ENVELOPE = 6000
 MAX_POINTS_FOR_KNN = 1200
 KNN_K = 8
 
 
+# ---------------------------------------------------------------------
+# Interpolation and resampling utilities
+# ---------------------------------------------------------------------
 def build_interpolators(height_df, outreach_df, load_df=None):
-    """Return fold_angles, main_angles, interpolators for height/outreach/load."""
+    """
+    Return (fold_angles, main_angles, height_itp, outreach_itp, load_itp)
+    as RegularGridInterpolators.
+    """
     fold_angles = height_df.index.values.astype(float)
     main_angles = height_df.columns.values.astype(float)
     outreach_df = outreach_df.reindex(index=fold_angles, columns=main_angles)
 
     height_itp = RegularGridInterpolator(
-        (fold_angles, main_angles), height_df.values,
-        bounds_error=False, fill_value=None
+        (fold_angles, main_angles),
+        height_df.values,
+        bounds_error=False,
+        fill_value=None,
     )
     outre_itp = RegularGridInterpolator(
-        (fold_angles, main_angles), outreach_df.values,
-        bounds_error=False, fill_value=None
+        (fold_angles, main_angles),
+        outreach_df.values,
+        bounds_error=False,
+        fill_value=None,
     )
 
     load_itp = None
     if load_df is not None and not load_df.empty:
         load_df = load_df.reindex(index=fold_angles, columns=main_angles)
         load_itp = RegularGridInterpolator(
-            (fold_angles, main_angles), load_df.values,
-            bounds_error=False, fill_value=None
+            (fold_angles, main_angles),
+            load_df.values,
+            bounds_error=False,
+            fill_value=None,
         )
+
     return fold_angles, main_angles, height_itp, outre_itp, load_itp
 
 
 def resample_grid_by_factors(fold_angles, main_angles, fold_factor, main_factor):
-    """Subdivide each angle interval by a factor."""
-    def expand(arr, f):
+    """
+    Subdivide each angular interval by a given factor.
+    Returns fnew, mnew, F, M, pts (Nx2 array).
+    """
+    def expand(arr, factor):
         arr = np.unique(np.asarray(arr, float))
         arr.sort()
-        if len(arr) < 2 or int(f) <= 1:
+        if len(arr) < 2 or int(factor) <= 1:
             return arr
         out = [arr[0]]
         for i in range(len(arr) - 1):
             a, b = arr[i], arr[i + 1]
-            seg = np.linspace(a, b, int(f) + 1, endpoint=True)[1:]
+            seg = np.linspace(a, b, int(factor) + 1, endpoint=True)[1:]
             out.extend(seg.tolist())
         return np.array(out, float)
 
@@ -64,6 +80,9 @@ def resample_grid_by_factors(fold_angles, main_angles, fold_factor, main_factor)
 
 
 def _sample_points(arr, max_n):
+    """
+    Uniformly sample up to max_n points for plotting or envelope building.
+    """
     n = len(arr)
     if n <= max_n:
         return arr
@@ -71,11 +90,26 @@ def _sample_points(arr, max_n):
     return arr[idx]
 
 
+# ---------------------------------------------------------------------
+# Envelope / boundary computation
+# ---------------------------------------------------------------------
 def compute_boundary_curve(xy_points, prefer_concave=True, alpha_scale=1.0):
     """
-    Return Nx2 array (x,y) for outer boundary.
-      - Concave: alphashape if available, scaled by alpha_scale
-      - Fallback: ConvexHull (SciPy)
+    Compute a 2D boundary curve around a set of (x,y) points.
+
+    Parameters
+    ----------
+    xy_points : ndarray (N,2)
+        Input coordinates (Outreach, Height)
+    prefer_concave : bool
+        If True and alphashape is available, compute a concave hull (alpha shape)
+    alpha_scale : float
+        Multiplier for the automatically estimated alpha parameter (default 1.0)
+
+    Returns
+    -------
+    ndarray (M,2) or None
+        Boundary polygon vertices, closed loop (x,y)
     """
     pts = np.asarray(xy_points, float)
     pts = pts[~np.isnan(pts).any(axis=1)]
@@ -89,29 +123,28 @@ def compute_boundary_curve(xy_points, prefer_concave=True, alpha_scale=1.0):
     # --- Concave attempt ---
     if prefer_concave and _HAS_ALPHASHAPE:
         try:
+            # Light subsample for performance
             n = min(len(pts), MAX_POINTS_FOR_ENVELOPE)
             idx = np.linspace(0, len(pts) - 1, n, dtype=int)
             pts_s = pts[idx]
 
-            # Estimate alpha (inverse of neighbor distance)
-            A = pts_s[:, None, :] - pts_s[None, :, :]
-            D = np.sqrt((A ** 2).sum(axis=2))
-            D.sort(axis=1)
-            k = min(8, len(pts_s) - 2)
-            dk = np.median(D[:, k]) if k >= 1 else np.median(D)
-            base_alpha = 1.0 / (1.8 * dk) if np.isfinite(dk) and dk > 0 else 1.0
-            alpha = max(1e-6, float(alpha_scale) * base_alpha)
+            # Automatically optimise alpha for shape tightness
+            alpha_opt = alphashape.optimizealpha(pts_s)
+            alpha = max(1e-7, float(alpha_scale or 1.0) * float(alpha_opt))
 
             poly = alphashape.alphashape(pts_s, alpha)
-            if hasattr(poly, "geoms"):  # MultiPolygon -> largest
+
+            # Handle MultiPolygon by picking the largest
+            if hasattr(poly, "geoms"):
                 poly = max(poly.geoms, key=lambda g: g.area)
+
             if hasattr(poly, "exterior"):
                 x, y = poly.exterior.coords.xy
                 out = np.column_stack([x, y])
                 if len(out) >= 3:
                     return out
         except Exception:
-            pass  # fall back
+            pass  # fall back to convex hull
 
     # --- Convex hull fallback ---
     try:
