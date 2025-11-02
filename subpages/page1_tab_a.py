@@ -32,9 +32,16 @@ if height_df.empty or outreach_df.empty:
 else:
     f_angles, m_angles, height_itp, outre_itp, _ = build_interpolators(height_df, outreach_df, load_df)
 
-    # Originals (for orange points + hover)
+    # Originals -> orange points + hover (with angles)
     F0, M0 = np.meshgrid(f_angles, m_angles, indexing="ij")
-    orig_xy = np.column_stack([outreach_df.values.ravel(), height_df.values.ravel()])
+    orig_outreach = outreach_df.values.ravel()
+    orig_height   = height_df.values.ravel()
+    orig_fold_deg = F0.ravel()
+    orig_main_deg = M0.ravel()
+
+    # Pack as XY and customdata for hover
+    orig_xy = np.column_stack([orig_outreach, orig_height])
+    orig_custom = np.column_stack([orig_fold_deg, orig_main_deg])
 
     controls = html.Div(
         style={"flex": "0 0 340px", "overflowY": "auto", "height": "78vh",
@@ -144,20 +151,28 @@ else:
         main_factor = int(main_factor or 1)
         fold_factor = int(fold_factor or 1)
 
-        # --- Interpolated grid (for blue points only) ---
+        # --- Interpolated grid (for blue points) ---
         _, _, _, _, pts = resample_grid_by_factors(f_angles, m_angles, fold_factor, main_factor)
         H_dense = height_itp(pts)
         R_dense = outre_itp(pts)
         if include_pedestal:
             H_dense = H_dense + PEDESTAL_HEIGHT_M
-        dense_xy = np.column_stack([R_dense, H_dense])
-        dense_xy = dense_xy[~np.isnan(dense_xy).any(axis=1)]
 
-        # --- Envelope built from original matrix points (outer red dots) ---
+        # Filter NaNs, then sample indices (so we can carry angles in hover)
+        valid = ~(np.isnan(H_dense) | np.isnan(R_dense))
+        pts_valid = pts[valid]
+        H_valid = H_dense[valid]
+        R_valid = R_dense[valid]
+
+        idx_plot = np.linspace(0, len(pts_valid) - 1, num=min(len(pts_valid), 15000), dtype=int)
+        pts_plot = pts_valid[idx_plot]                 # [:,0]=Folding, [:,1]=Main
+        dense_xy = np.column_stack([R_valid[idx_plot], H_valid[idx_plot]])
+
+        # --- Envelope from ORIGINAL matrix points (outer red dots) ---
         if include_pedestal:
-            env_orig_xy = np.column_stack([orig_xy[:, 0], orig_xy[:, 1] + PEDESTAL_HEIGHT_M])
+            env_orig_xy = np.column_stack([orig_outreach, orig_height + PEDESTAL_HEIGHT_M])
         else:
-            env_orig_xy = orig_xy
+            env_orig_xy = np.column_stack([orig_outreach, orig_height])
 
         fallback_note = ""
         envelope_xy = None
@@ -172,24 +187,35 @@ else:
 
         fig = go.Figure()
 
-        # Interpolated points (blue)
-        dense_for_plot = _sample_points(dense_xy, 15000)
-        if dense_for_plot.size:
-            hover_tmpl = "Outreach: %{x:.2f} m<br>Height: %{y:.2f} m<extra></extra>"
+        # Interpolated points (blue) — with angles in hover
+        if len(dense_xy):
             fig.add_trace(go.Scatter(
-                x=dense_for_plot[:, 0], y=dense_for_plot[:, 1],
-                mode="markers", marker=dict(size=4, symbol="diamond", opacity=0.5),
+                x=dense_xy[:, 0], y=dense_xy[:, 1],
+                mode="markers",
+                marker=dict(size=4, symbol="diamond", opacity=0.5),
                 name="Interpolated points",
-                hovertemplate=hover_tmpl
+                customdata=pts_plot,  # [Folding_deg, Main_deg]
+                hovertemplate=(
+                    "Main Jib: %{customdata[1]:.2f}°<br>"
+                    "Folding Jib: %{customdata[0]:.2f}°<br>"
+                    "Outreach: %{x:.2f} m<br>"
+                    "Height: %{y:.2f} m<extra></extra>"
+                )
             ))
 
-        # Original matrix points (orange)
+        # Original matrix points (orange) — with angles in hover
         fig.add_trace(go.Scatter(
             x=env_orig_xy[:, 0],
             y=env_orig_xy[:, 1],
             mode="markers", marker=dict(size=8),
             name="Original matrix points",
-            hovertemplate="Outreach: %{x:.2f} m<br>Height: %{y:.2f} m<extra></extra>"
+            customdata=np.column_stack([orig_fold_deg, orig_main_deg]),
+            hovertemplate=(
+                "Main Jib: %{customdata[1]:.2f}°<br>"
+                "Folding Jib: %{customdata[0]:.2f}°<br>"
+                "Outreach: %{x:.2f} m<br>"
+                "Height: %{y:.2f} m<extra></extra>"
+            )
         ))
 
         # Envelope (green)
@@ -226,8 +252,8 @@ else:
         _, _, _, _, pts = resample_grid_by_factors(f_angles, m_angles, fold_factor, main_factor)
         df = pd.DataFrame({
             "FoldingJib_deg": pts[:, 0],
-            "MainJib_deg": pts[:, 1],
-            "Outreach_m": outre_itp(pts),
-            "Height_m": height_itp(pts),
+            "MainJib_deg":    pts[:, 1],
+            "Outreach_m":     outre_itp(pts),
+            "Height_m":       height_itp(pts),
         }).dropna()
         return dcc.send_data_frame(df.to_csv, "interpolated_geometry.csv", index=False)
