@@ -36,7 +36,7 @@ sidebar = html.Nav(
                 html.Li(dcc.Link("Page 3", href="/page-3", className="sidebar-link")),
             ],
         ),
-        html.Div(className="sidebar-footer", children="© Your Company")
+        html.Div(className="sidebar-footer", children="© DCN Diving B.V.")
     ],
 )
 
