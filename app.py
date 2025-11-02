@@ -18,7 +18,7 @@ server = app.server  # for gunicorn / Coolify
 header = html.Header(
     className="app-header",
     children=[
-        html.Div("My Application", className="app-title"),
+        html.Div("My Application 2", className="app-title"),
         html.Img(src="/assets/logo.png", className="app-logo", alt="Logo")
     ],
 )
