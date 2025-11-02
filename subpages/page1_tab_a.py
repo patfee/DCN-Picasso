@@ -144,20 +144,26 @@ else:
         main_factor = int(main_factor or 1)
         fold_factor = int(fold_factor or 1)
 
+        # --- Interpolated grid (for blue points only) ---
         _, _, _, _, pts = resample_grid_by_factors(f_angles, m_angles, fold_factor, main_factor)
         H_dense = height_itp(pts)
         R_dense = outre_itp(pts)
         if include_pedestal:
             H_dense = H_dense + PEDESTAL_HEIGHT_M
-
         dense_xy = np.column_stack([R_dense, H_dense])
         dense_xy = dense_xy[~np.isnan(dense_xy).any(axis=1)]
+
+        # --- Envelope built from original matrix points (outer red dots) ---
+        if include_pedestal:
+            env_orig_xy = np.column_stack([orig_xy[:, 0], orig_xy[:, 1] + PEDESTAL_HEIGHT_M])
+        else:
+            env_orig_xy = orig_xy
 
         fallback_note = ""
         envelope_xy = None
         if draw_envelope:
             envelope_xy = compute_boundary_curve(
-                _sample_points(dense_xy, 6000),
+                _sample_points(env_orig_xy, 6000),
                 prefer_concave=prefer_concave,
                 alpha_scale=(alpha_scale or 1.0)
             )
@@ -178,14 +184,13 @@ else:
             ))
 
         # Original matrix points (orange)
-        if orig_xy.size:
-            fig.add_trace(go.Scatter(
-                x=orig_xy[:, 0],
-                y=orig_xy[:, 1] + (PEDESTAL_HEIGHT_M if include_pedestal else 0.0),
-                mode="markers", marker=dict(size=8),
-                name="Original matrix points",
-                hovertemplate=hover_tmpl
-            ))
+        fig.add_trace(go.Scatter(
+            x=env_orig_xy[:, 0],
+            y=env_orig_xy[:, 1],
+            mode="markers", marker=dict(size=8),
+            name="Original matrix points",
+            hovertemplate="Outreach: %{x:.2f} m<br>Height: %{y:.2f} m<extra></extra>"
+        ))
 
         # Envelope (green)
         if envelope_xy is not None and len(envelope_xy) > 2:
