@@ -1,7 +1,8 @@
 dash
 dash-bootstrap-components
+plotly
 pandas
-gunicorn
-scipy
-shapely
-alphashape
+numpy
+scipy==1.13.1
+shapely==2.0.4
+alphashape==1.3.1
