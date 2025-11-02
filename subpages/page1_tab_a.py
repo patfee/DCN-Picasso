@@ -1,5 +1,7 @@
-from dash import html, dcc, Input, Output, State
 import dash
+dash.register_page(__name__, path="/page-1/sub-a", name="Page 1 – Sub A")
+
+from dash import html, dcc, Input, Output, State
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
