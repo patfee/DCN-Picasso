@@ -116,16 +116,32 @@ def stack_height_outreach(height_df: pd.DataFrame, outreach_df: pd.DataFrame) ->
       main_deg, folding_deg, height_m, outreach_m
     Only keep finite pairs.
     """
+    # Union grids so we align both matrices
     f_angles = sorted(set(height_df.index).union(set(outreach_df.index)))
     m_angles = sorted(set(height_df.columns).union(set(outreach_df.columns)))
     H = height_df.reindex(index=f_angles, columns=m_angles)
     R = outreach_df.reindex(index=f_angles, columns=m_angles)
 
-    h_long = H.stack().rename("height_m").reset_index(names=["folding_deg", "main_deg"])
-    r_long = R.stack().rename("outreach_m").reset_index(names=["folding_deg", "main_deg"])
+    # Stack -> Series with MultiIndex (folding_deg, main_deg), then reset to columns
+    h_long = H.stack().rename("height_m").reset_index()
+    h_long.columns = ["folding_deg", "main_deg", "height_m"]
+
+    r_long = R.stack().rename("outreach_m").reset_index()
+    r_long.columns = ["folding_deg", "main_deg", "outreach_m"]
+
+    # Inner join on angle pairs (keep only pairs that exist in both)
     df = pd.merge(h_long, r_long, on=["folding_deg", "main_deg"], how="inner")
-    df = df[np.isfinite(df["height_m"]) & np.isfinite(df["outreach_m"])]
-    # ensure float
-    df["folding_deg"] = df["folding_deg"].astype(float)
-    df["main_deg"] = df["main_deg"].astype(float)
+
+    # Keep finite numeric pairs, ensure float types
+    df = df[pd.to_numeric(df["height_m"], errors="coerce").notna() &
+            pd.to_numeric(df["outreach_m"], errors="coerce").notna()]
+
+    df["folding_deg"] = pd.to_numeric(df["folding_deg"], errors="coerce")
+    df["main_deg"] = pd.to_numeric(df["main_deg"], errors="coerce")
+    df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce")
+    df["outreach_m"] = pd.to_numeric(df["outreach_m"], errors="coerce")
+
+    df = df.dropna(subset=["folding_deg", "main_deg", "height_m", "outreach_m"])
+
     return df.sort_values(["main_deg", "folding_deg"]).reset_index(drop=True)
+
