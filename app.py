@@ -1,11 +1,14 @@
+import os
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
-import os
 
-# ---------------------------------------------------------------------
-# Initialize Dash App
-# ---------------------------------------------------------------------
+# ---- Force component libraries to register at import time ----
+# (These imports have side-effects that register JS bundles with Dash.)
+import dash.dcc as _dcc   # noqa: F401
+import dash.html as _html  # noqa: F401
+import dash_bootstrap_components as _dbc  # noqa: F401
+
 app = dash.Dash(
     __name__,
     use_pages=True,
@@ -13,23 +16,16 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     assets_folder="assets",
     title="DCN Picasso – Crane Tool",
-    serve_locally=True,  # important when running behind proxy or offline
+    serve_locally=True,       # serve bundles from this container
+    eager_loading=True,       # pre-import components before first request
 )
+server = app.server  # for gunicorn / Coolify
 
-server = app.server  # expose Flask server for gunicorn / Coolify
-
-# ---------------------------------------------------------------------
-# Header (title left, logo right)
-# ---------------------------------------------------------------------
+# --- Header (title left, logo right) ---
 header = html.Header(
     [
         html.H2("DCN Picasso – Crane Visualization", style={"margin": 0}),
-        html.Img(
-            src="/assets/logo.png",
-            alt="DCN Logo",
-            height="48px",
-            style={"marginLeft": "12px"},
-        ),
+        html.Img(src="/assets/logo.png", alt="DCN Logo", height="48px"),
     ],
     style={
         "display": "flex",
@@ -44,11 +40,8 @@ header = html.Header(
     },
 )
 
-# ---------------------------------------------------------------------
-# Sidebar / Menu
-# ---------------------------------------------------------------------
+# --- Sidebar ---
 SIDEBAR_WIDTH = 240
-
 sidebar = html.Nav(
     [
         html.Div("Menu", style={"fontWeight": 600, "marginBottom": 8}),
@@ -58,18 +51,13 @@ sidebar = html.Nav(
                 html.Li(dcc.Link("Page 2", href="/page2")),
                 html.Li(dcc.Link("Page 3", href="/page3")),
             ],
-            style={
-                "listStyle": "none",
-                "padding": 0,
-                "margin": 0,
-                "lineHeight": "2.0",
-            },
+            style={"listStyle": "none", "padding": 0, "margin": 0, "lineHeight": "2.0"},
         ),
         html.Div("© DCN Diving B.V.", style={"marginTop": "auto", "color": "#777"}),
     ],
     style={
         "position": "fixed",
-        "top": 62,  # just under header
+        "top": 62,
         "left": 0,
         "bottom": 0,
         "width": f"{SIDEBAR_WIDTH}px",
@@ -83,9 +71,7 @@ sidebar = html.Nav(
     },
 )
 
-# ---------------------------------------------------------------------
-# Main Content Area
-# ---------------------------------------------------------------------
+# --- Content ---
 content = html.Main(
     [dash.page_container],
     style={
@@ -95,15 +81,9 @@ content = html.Main(
     },
 )
 
-# ---------------------------------------------------------------------
-# App Layout
-# ---------------------------------------------------------------------
+# --- Layout ---
 app.layout = html.Div([header, sidebar, content])
 
-# ---------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------
 if __name__ == "__main__":
-    # Bind to all interfaces; default port 3000 so the app is reachable at 192.168.1.203:3000
     port = int(os.environ.get("PORT", 3000))
     app.run_server(host="0.0.0.0", port=port, debug=True)
