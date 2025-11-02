@@ -3,49 +3,106 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 import os
 
-# --- App ---
+# ---------------------------------------------------------------------
+# Initialize Dash App
+# ---------------------------------------------------------------------
 app = dash.Dash(
     __name__,
     use_pages=True,
     suppress_callback_exceptions=True,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     assets_folder="assets",
-    title="My Application"
+    title="DCN Picasso – Crane Tool",
+    serve_locally=True,  # important when running behind proxy or offline
 )
-server = app.server  # for gunicorn / Coolify
 
-# --- Header ---
+server = app.server  # expose Flask server for gunicorn / Coolify
+
+# ---------------------------------------------------------------------
+# Header (title left, logo right)
+# ---------------------------------------------------------------------
 header = html.Header(
-    className="app-header",
-    children=[
-        html.Div("My Application 2", className="app-title"),
-        html.Img(src="/assets/logo.png", className="app-logo", alt="Logo")
-    ],
-)
-
-# --- Sidebar ---
-sidebar = html.Nav(
-    className="app-sidebar",
-    children=[
-        html.Div("Menu", className="sidebar-title"),
-        html.Ul(
-            className="sidebar-list",
-            children=[
-                html.Li(dcc.Link("Page 1", href="/page-1", className="sidebar-link")),
-                html.Li(dcc.Link("Page 2", href="/page-2", className="sidebar-link")),
-                html.Li(dcc.Link("Page 3", href="/page-3", className="sidebar-link")),
-            ],
+    [
+        html.H2("DCN Picasso – Crane Visualization", style={"margin": 0}),
+        html.Img(
+            src="/assets/logo.png",
+            alt="DCN Logo",
+            height="48px",
+            style={"marginLeft": "12px"},
         ),
-        html.Div(className="sidebar-footer", children="© Your Company")
     ],
+    style={
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center",
+        "padding": "10px 16px",
+        "borderBottom": "1px solid #eee",
+        "position": "sticky",
+        "top": 0,
+        "zIndex": 1000,
+        "background": "white",
+    },
 )
 
-# --- Content ---
-content = html.Main(className="app-content", children=[dash.page_container])
+# ---------------------------------------------------------------------
+# Sidebar / Menu
+# ---------------------------------------------------------------------
+SIDEBAR_WIDTH = 240
 
-# --- Layout ---
-app.layout = html.Div(className="app-root", children=[header, sidebar, content])
+sidebar = html.Nav(
+    [
+        html.Div("Menu", style={"fontWeight": 600, "marginBottom": 8}),
+        html.Ul(
+            [
+                html.Li(dcc.Link("Page 1", href="/page1")),
+                html.Li(dcc.Link("Page 2", href="/page2")),
+                html.Li(dcc.Link("Page 3", href="/page3")),
+            ],
+            style={
+                "listStyle": "none",
+                "padding": 0,
+                "margin": 0,
+                "lineHeight": "2.0",
+            },
+        ),
+        html.Div("© DCN Diving B.V.", style={"marginTop": "auto", "color": "#777"}),
+    ],
+    style={
+        "position": "fixed",
+        "top": 62,  # just under header
+        "left": 0,
+        "bottom": 0,
+        "width": f"{SIDEBAR_WIDTH}px",
+        "padding": "12px 16px",
+        "borderRight": "1px solid #eee",
+        "background": "#fafafa",
+        "overflowY": "auto",
+        "display": "flex",
+        "flexDirection": "column",
+        "gap": "8px",
+    },
+)
 
+# ---------------------------------------------------------------------
+# Main Content Area
+# ---------------------------------------------------------------------
+content = html.Main(
+    [dash.page_container],
+    style={
+        "marginLeft": f"{SIDEBAR_WIDTH + 16}px",
+        "padding": "16px",
+        "minHeight": "calc(100vh - 62px)",
+    },
+)
+
+# ---------------------------------------------------------------------
+# App Layout
+# ---------------------------------------------------------------------
+app.layout = html.Div([header, sidebar, content])
+
+# ---------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
     # Bind to all interfaces; default port 3000 so the app is reachable at 192.168.1.203:3000
     port = int(os.environ.get("PORT", 3000))
