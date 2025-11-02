@@ -6,7 +6,8 @@ import plotly.graph_objects as go
 
 from lib.data_utils import load_matrix_csv_flexible
 from lib.geo_utils import (
-    build_interpolators, resample_grid_by_factors, compute_boundary_curve, _sample_points
+    build_interpolators, resample_grid_by_factors, compute_boundary_curve,
+    _sample_points, _HAS_ALPHASHAPE  # <- show concave engine ON/OFF in UI
 )
 
 # ------- Settings -------
@@ -38,10 +39,6 @@ else:
     orig_height   = height_df.values.ravel()
     orig_fold_deg = F0.ravel()
     orig_main_deg = M0.ravel()
-
-    # Pack as XY and customdata for hover
-    orig_xy = np.column_stack([orig_outreach, orig_height])
-    orig_custom = np.column_stack([orig_fold_deg, orig_main_deg])
 
     controls = html.Div(
         style={"flex": "0 0 340px", "overflowY": "auto", "height": "78vh",
@@ -82,14 +79,21 @@ else:
                 style={"marginTop": "4px"}
             ),
 
+            # --- Improvement #3: wider slider range + higher default ---
             html.Label("Concavity (concave mode only)", style={"fontWeight": 600, "marginTop": "8px"}),
             dcc.Slider(
                 id="p1a-alpha-scale",
-                min=0.25, max=3.0, step=0.05, value=1.0,
+                min=0.1, max=8.0, step=0.1, value=2.5,  # wider range; tighter by default
                 tooltip={"placement": "bottom"},
             ),
 
-            html.Div(id="p1a-envelope-help", style={"fontSize": "12px", "color": "#555"}),
+            # --- Improvement #1: visible engine status (ON/OFF) ---
+            html.Div(
+                f"Concave engine: {'ON (alphashape+shapely found)' if _HAS_ALPHASHAPE else 'OFF (falling back to convex hull)'}",
+                style={"fontSize": "12px", "color": "#555", "marginTop": "4px"},
+            ),
+
+            html.Div(id="p1a-envelope-help", style={"fontSize": "12px", "color": "#555", "marginTop": "6px"}),
 
             html.Div([
                 html.Button("Download interpolated CSV", id="p1a-btn-download", n_clicks=0,
@@ -132,7 +136,7 @@ else:
         if kind == "none":
             return "Points only."
         if kind == "concave":
-            return f"Concave alpha shape (requires alphashape+shapely). Scale={a:.2f}×."
+            return f"Concave alpha shape (needs alphashape+shapely). Try Scale 1.5–4.0. Current={a:.2f}×."
         return "Convex hull: stable outer boundary using SciPy only."
 
     @dash.callback(
@@ -158,7 +162,6 @@ else:
         if include_pedestal:
             H_dense = H_dense + PEDESTAL_HEIGHT_M
 
-        # Filter NaNs, then sample indices (so we can carry angles in hover)
         valid = ~(np.isnan(H_dense) | np.isnan(R_dense))
         pts_valid = pts[valid]
         H_valid = H_dense[valid]
