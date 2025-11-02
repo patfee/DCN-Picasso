@@ -3,9 +3,9 @@ import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-# ---- Force component libraries to register at import time ----
-# (These imports have side-effects that register JS bundles with Dash.)
-import dash.dcc as _dcc   # noqa: F401
+# --- Force component libraries to register their bundles at import time ---
+# (These imports have side-effects that populate Dash's registered_paths)
+import dash.dcc as _dcc  # noqa: F401
 import dash.html as _html  # noqa: F401
 import dash_bootstrap_components as _dbc  # noqa: F401
 
@@ -16,10 +16,10 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     assets_folder="assets",
     title="DCN Picasso – Crane Tool",
-    serve_locally=True,       # serve bundles from this container
-    eager_loading=True,       # pre-import components before first request
+    serve_locally=True,   # serve bundles from this container
+    eager_loading=True,   # pre-import component libs before first request
 )
-server = app.server  # for gunicorn / Coolify
+server = app.server
 
 # --- Header (title left, logo right) ---
 header = html.Header(
@@ -40,7 +40,6 @@ header = html.Header(
     },
 )
 
-# --- Sidebar ---
 SIDEBAR_WIDTH = 240
 sidebar = html.Nav(
     [
@@ -71,7 +70,6 @@ sidebar = html.Nav(
     },
 )
 
-# --- Content ---
 content = html.Main(
     [dash.page_container],
     style={
@@ -81,7 +79,6 @@ content = html.Main(
     },
 )
 
-# --- Layout ---
 app.layout = html.Div([header, sidebar, content])
 
 if __name__ == "__main__":
