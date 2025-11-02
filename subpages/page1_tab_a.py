@@ -13,7 +13,6 @@ from lib.geo_utils import (
 PEDESTAL_HEIGHT_M = 6.0
 HEIGHT_CANDIDATES = ("height.csv", "Height.csv")
 OUTREACH_CANDIDATES = ("outreach.csv", "Outreach.csv")
-# Optional 2D load matrix (same angle grid). If absent, plot still works:
 LOAD_CANDIDATES = ("Harbour_Cdyn115.csv", "harbour_Cdyn115.csv")
 
 # ------- Load matrices -------
@@ -114,10 +113,10 @@ else:
     @dash.callback(Output("p1a-envelope-help", "children"), Input("p1a-envelope-type", "value"))
     def _explain(kind):
         if kind == "none":
-            return "Displays only points (no envelope). Useful for checking interpolation coverage."
+            return "Points only."
         if kind == "concave":
-            return "Concave alpha shape: tighter, realistic shape but sensitive to sparse data."
-        return "Convex hull: stable and conservative outer boundary."
+            return "Concave alpha shape (requires 'alphashape'). Auto-fallbacks to convex hull if unavailable."
+        return "Convex hull: stable outer boundary using SciPy only."
 
     @dash.callback(
         Output("p1a-graph", "figure"),
@@ -143,14 +142,17 @@ else:
         dense_xy = np.column_stack([R_dense, H_dense])
         dense_xy = dense_xy[~np.isnan(dense_xy).any(axis=1)]
 
+        fallback_note = ""
         envelope_xy = None
         if draw_envelope:
             envelope_xy = compute_boundary_curve(_sample_points(dense_xy, 6000),
                                                  prefer_concave=prefer_concave)
+            if envelope_xy is None:
+                fallback_note = " (envelope unavailable: not enough points or geometry lib missing)"
 
         fig = go.Figure()
 
-        # Interpolated points (blue-ish)
+        # Interpolated points (blue)
         dense_for_plot = _sample_points(dense_xy, 15000)
         if dense_for_plot.size:
             hover_tmpl = (
@@ -182,6 +184,7 @@ else:
             ))
 
         fig.update_layout(
+            title="Crane Height vs Outreach" + fallback_note,
             xaxis_title="Outreach [m]",
             yaxis_title="Jib head height [m]" if include_pedestal
                        else "Jib head above pedestal flange [m]",
