@@ -35,7 +35,6 @@ else:
     # Originals (for orange points + hover)
     F0, M0 = np.meshgrid(f_angles, m_angles, indexing="ij")
     orig_xy = np.column_stack([outreach_df.values.ravel(), height_df.values.ravel()])
-    orig_custom = np.column_stack([F0.ravel(), M0.ravel()])
 
     controls = html.Div(
         style={"flex": "0 0 340px", "overflowY": "auto", "height": "78vh",
@@ -75,6 +74,14 @@ else:
                 value="convex",
                 style={"marginTop": "4px"}
             ),
+
+            html.Label("Concavity (concave mode only)", style={"fontWeight": 600, "marginTop": "8px"}),
+            dcc.Slider(
+                id="p1a-alpha-scale",
+                min=0.25, max=3.0, step=0.05, value=1.0,
+                tooltip={"placement": "bottom"},
+            ),
+
             html.Div(id="p1a-envelope-help", style={"fontSize": "12px", "color": "#555"}),
 
             html.Div([
@@ -110,12 +117,15 @@ else:
             f"(original points: {len(np.unique(f_angles))})",
         )
 
-    @dash.callback(Output("p1a-envelope-help", "children"), Input("p1a-envelope-type", "value"))
-    def _explain(kind):
+    @dash.callback(
+        Output("p1a-envelope-help", "children"),
+        Input("p1a-envelope-type", "value"),
+        Input("p1a-alpha-scale", "value"))
+    def _explain(kind, a):
         if kind == "none":
             return "Points only."
         if kind == "concave":
-            return "Concave alpha shape (requires 'alphashape'). Auto-fallbacks to convex hull if unavailable."
+            return f"Concave alpha shape (requires alphashape+shapely). Scale={a:.2f}×."
         return "Convex hull: stable outer boundary using SciPy only."
 
     @dash.callback(
@@ -124,8 +134,9 @@ else:
         Input("p1a-fold-factor", "value"),
         Input("p1a-pedestal-toggle", "value"),
         Input("p1a-envelope-type", "value"),
+        Input("p1a-alpha-scale", "value"),
     )
-    def _update_figure(main_factor, fold_factor, pedestal_value, envelope_value):
+    def _update_figure(main_factor, fold_factor, pedestal_value, envelope_value, alpha_scale):
         include_pedestal = "on" in (pedestal_value or [])
         prefer_concave = (envelope_value == "concave")
         draw_envelope = (envelope_value != "none")
@@ -145,20 +156,20 @@ else:
         fallback_note = ""
         envelope_xy = None
         if draw_envelope:
-            envelope_xy = compute_boundary_curve(_sample_points(dense_xy, 6000),
-                                                 prefer_concave=prefer_concave)
+            envelope_xy = compute_boundary_curve(
+                _sample_points(dense_xy, 6000),
+                prefer_concave=prefer_concave,
+                alpha_scale=(alpha_scale or 1.0)
+            )
             if envelope_xy is None:
-                fallback_note = " (envelope unavailable: not enough points or geometry lib missing)"
+                fallback_note = " (envelope unavailable: try increasing concavity or install alphashape/shapely)"
 
         fig = go.Figure()
 
         # Interpolated points (blue)
         dense_for_plot = _sample_points(dense_xy, 15000)
         if dense_for_plot.size:
-            hover_tmpl = (
-                "Outreach: %{x:.2f} m<br>"
-                "Height: %{y:.2f} m<extra></extra>"
-            )
+            hover_tmpl = "Outreach: %{x:.2f} m<br>Height: %{y:.2f} m<extra></extra>"
             fig.add_trace(go.Scatter(
                 x=dense_for_plot[:, 0], y=dense_for_plot[:, 1],
                 mode="markers", marker=dict(size=4, symbol="diamond", opacity=0.5),
@@ -210,8 +221,8 @@ else:
         _, _, _, _, pts = resample_grid_by_factors(f_angles, m_angles, fold_factor, main_factor)
         df = pd.DataFrame({
             "FoldingJib_deg": pts[:, 0],
-            "MainJib_deg":    pts[:, 1],
-            "Outreach_m":     outre_itp(pts),
-            "Height_m":       height_itp(pts),
+            "MainJib_deg": pts[:, 1],
+            "Outreach_m": outre_itp(pts),
+            "Height_m": height_itp(pts),
         }).dropna()
         return dcc.send_data_frame(df.to_csv, "interpolated_geometry.csv", index=False)
