@@ -1,7 +1,17 @@
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-import shapely.geometry as sgeom
-import alphashape
+from scipy.spatial import ConvexHull
+
+# --- keep the rest of your imports & constants as-is ---
+# MAX_POINTS_FOR_DISPLAY, MAX_POINTS_FOR_ENVELOPE, MAX_POINTS_FOR_KNN, KNN_K, etc.
+
+# Add this small safe-import block at the top (below other imports):
+try:
+    import alphashape  # optional
+    _HAS_ALPHASHAPE = True
+except Exception:
+    alphashape = None
+    _HAS_ALPHASHAPE = False
 
 # caps to keep plots responsive
 MAX_POINTS_FOR_DISPLAY = 15000
@@ -80,35 +90,57 @@ def _estimate_alpha(pts, k=KNN_K):
 
 def compute_boundary_curve(xy_points, prefer_concave=True):
     """
-    Return Nx2 array (x,y) for outer boundary. Uses alphashape (concave) if available,
-    otherwise convex hull. Robust to duplicates and NaNs.
+    Return Nx2 array (x,y) for outer boundary.
+      - If prefer_concave and alphashape is available, try concave alpha-shape.
+      - Otherwise (or on failure) fall back to SciPy ConvexHull.
+    Robust to NaNs and duplicate points. Returns None if not enough points.
     """
     pts = np.asarray(xy_points, float)
     pts = pts[~np.isnan(pts).any(axis=1)]
     if len(pts) < 3:
         return None
+
+    # De-duplicate to help hull robustness
     pts = np.unique(pts, axis=0)
     if len(pts) < 3:
         return None
 
-    poly = None
-    if prefer_concave:
+    # Concave attempt (optional)
+    if prefer_concave and _HAS_ALPHASHAPE:
         try:
-            pts_cap = _sample_points(pts, MAX_POINTS_FOR_ENVELOPE)
-            alpha = _estimate_alpha(pts_cap)
-            poly = alphashape.alphashape(pts_cap, alpha)
+            # Light subsample for performance
+            n = min(len(pts), MAX_POINTS_FOR_ENVELOPE)
+            idx = np.linspace(0, len(pts) - 1, n, dtype=int)
+            pts_s = pts[idx]
+
+            # Estimate alpha ~ inverse of typical neighbor distance
+            A = pts_s[:, None, :] - pts_s[None, :, :]
+            D = np.sqrt((A ** 2).sum(axis=2))
+            D.sort(axis=1)
+            k = min(8, len(pts_s) - 2)
+            dk = np.median(D[:, k]) if k >= 1 else np.median(D)
+            alpha = 1.0 / (1.8 * dk) if np.isfinite(dk) and dk > 0 else 1.0
+
+            poly = alphashape.alphashape(pts_s, alpha)
+            # Extract exterior ring if polygon
+            try:
+                # Shapely-like geometry interface expected
+                if hasattr(poly, "geoms"):  # MultiPolygon, pick largest
+                    poly = max(poly.geoms, key=lambda g: g.area)
+                if hasattr(poly, "exterior"):
+                    x, y = poly.exterior.coords.xy
+                    out = np.column_stack([x, y])
+                    if len(out) >= 3:
+                        return out
+            except Exception:
+                pass
         except Exception:
-            poly = None
+            pass  # fall back to convex hull
 
-    if poly is None:
-        poly = sgeom.MultiPoint(pts).convex_hull
-
-    if isinstance(poly, sgeom.MultiPolygon):
-        poly = max(poly.geoms, key=lambda g: g.area)
-    if isinstance(poly, sgeom.Polygon):
-        x, y = poly.exterior.coords.xy
-        return np.column_stack([x, y])
-    if isinstance(poly, sgeom.LineString):
-        x, y = poly.coords.xy
-        return np.column_stack([x, y])
-    return None
+    # Convex hull fallback (pure SciPy)
+    try:
+        hull = ConvexHull(pts)
+        cycle = np.append(hull.vertices, hull.vertices[0])
+        return pts[cycle]
+    except Exception:
+        return None
