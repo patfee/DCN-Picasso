@@ -4,23 +4,19 @@ import plotly.graph_objs as go
 import numpy as np
 import pandas as pd
 from scipy.interpolate import griddata
-from scipy.spatial import Delaunay
-from matplotlib.path import Path
+from scipy.spatial import Delaunay, ConvexHull
 
 from lib.data_utils import (
-    get_position_grids,       # XY grids aligned with Page 1 (mode, factors, pedestal)
-    load_value_grid,          # loads angle-grid CSV (Harbour_Cdyn115.csv)
-    interpolate_value_grid,   # interpolates that value grid to current angle grid
-    flatten_with_values,      # flattens XY+values to a tidy table
+    get_position_grids,
+    load_value_grid,
+    interpolate_value_grid,
+    flatten_with_values,
 )
 
 VALUE_FILE  = "Harbour_Cdyn115.csv"
 VALUE_LABEL = "Capacity [t]"
 
-# Band edges (t) – as in the manual
 ISO_LEVELS = [0, 35, 70, 105, 140]
-
-# Colors broadly matching the manual
 COLORSCALE = [
     [0.00, "#003b46"],  # deep teal
     [0.20, "#00b3c6"],  # cyan
@@ -29,8 +25,7 @@ COLORSCALE = [
     [0.80, "#ff8840"],  # orange
     [1.00, "#cc2f2f"],  # red
 ]
-
-BAND_COLORS = ["#00b3c6", "#9ecf2a", "#ffcc33", "#ff8840"]  # legend swatches
+BAND_COLORS = ["#00b3c6", "#9ecf2a", "#ffcc33", "#ff8840"]
 
 
 def _legend_card() -> dbc.Card:
@@ -42,16 +37,12 @@ def _legend_card() -> dbc.Card:
             html.Div(
                 className="d-flex align-items-center mb-1",
                 children=[
-                    html.Div(
-                        style={
-                            "width": "16px",
-                            "height": "16px",
-                            "backgroundColor": color,
-                            "border": "1px solid rgba(0,0,0,0.2)",
-                            "marginRight": "8px",
-                            "borderRadius": "3px",
-                        }
-                    ),
+                    html.Div(style={
+                        "width": "16px", "height": "16px",
+                        "backgroundColor": color,
+                        "border": "1px solid rgba(0,0,0,0.2)",
+                        "marginRight": "8px", "borderRadius": "3px"
+                    }),
                     html.Span(f"{lo:g} – {hi:g} t"),
                 ],
             )
@@ -61,10 +52,8 @@ def _legend_card() -> dbc.Card:
             [
                 html.Div("Iso-capacity bands (Cdyn 1.15)", className="fw-semibold mb-2"),
                 *rows,
-                html.Div(
-                    "Bands follow your Page 1 interpolation & subdivisions.",
-                    className="text-muted small mt-2",
-                ),
+                html.Div("Bands follow your Page 1 interpolation & subdivisions.",
+                         className="text-muted small mt-2"),
             ]
         ),
         className="mt-3",
@@ -72,10 +61,9 @@ def _legend_card() -> dbc.Card:
     )
 
 
-# ---------- Concave hull (alpha-shape) utilities (no Shapely) ----------
+# ----------------- Concave hull (alpha-shape) without extra deps -----------------
 
 def _triangle_circumradius(a, b, c):
-    """Circumradius of triangle ABC (edges as vectors)."""
     A = np.linalg.norm(b - c)
     B = np.linalg.norm(c - a)
     C = np.linalg.norm(a - b)
@@ -85,190 +73,154 @@ def _triangle_circumradius(a, b, c):
         return np.inf
     return (A * B * C) / (4.0 * area)
 
-def _alpha_shape(points, alpha):
-    """
-    Alpha-shape polygon (as ordered vertices) from 2D points.
-    Keeps triangles with circumradius < 1/alpha (smaller alpha => tighter hull).
-    Returns Nx2 array of polygon vertices ordered as a boundary.
-    """
-    if len(points) < 4:
-        # trivial: return convex hull order
-        from scipy.spatial import ConvexHull
-        hull = ConvexHull(points)
-        return points[hull.vertices]
+def _alpha_shape(points: np.ndarray, alpha: float) -> np.ndarray:
+    """Return ordered polygon vertices of an alpha-shape (concave hull)."""
+    pts = np.asarray(points, float)
+    if len(pts) < 4:
+        hull = ConvexHull(pts)
+        return pts[hull.vertices]
 
-    tri = Delaunay(points)
-    triangles = tri.simplices
+    tri = Delaunay(pts)
     keep = []
     inv_alpha = 1.0 / max(alpha, 1e-9)
-
-    for tri_ix in triangles:
-        pa, pb, pc = points[tri_ix]
-        R = _triangle_circumradius(pa, pb, pc)
-        if R < inv_alpha:
-            keep.append(tri_ix)
-
+    for simp in tri.simplices:
+        pa, pb, pc = pts[simp]
+        if _triangle_circumradius(pa, pb, pc) < inv_alpha:
+            keep.append(simp)
     if not keep:
-        # fallback to convex hull if alpha too small
-        from scipy.spatial import ConvexHull
-        hull = ConvexHull(points)
-        return points[hull.vertices]
+        hull = ConvexHull(pts)
+        return pts[hull.vertices]
 
-    # Build a set of boundary edges (edges that appear only once)
+    # edges that appear once = boundary
     edges = {}
     def add_edge(i, j):
         if i > j:
             i, j = j, i
         edges[(i, j)] = edges.get((i, j), 0) + 1
-
-    for tri_ix in keep:
-        i, j, k = tri_ix
+    for simp in keep:
+        i, j, k = simp
         add_edge(i, j); add_edge(j, k); add_edge(k, i)
-
-    boundary = [e for e, cnt in edges.items() if cnt == 1]
+    boundary = [e for e, c in edges.items() if c == 1]
     if not boundary:
-        from scipy.spatial import ConvexHull
-        hull = ConvexHull(points)
-        return points[hull.vertices]
+        hull = ConvexHull(pts)
+        return pts[hull.vertices]
 
-    # Order boundary edges into a polygon path
-    # Build adjacency
+    # order boundary into a closed loop
     adj = {}
     for i, j in boundary:
         adj.setdefault(i, []).append(j)
         adj.setdefault(j, []).append(i)
 
-    # Start from a node with degree 1 if available (should be 2 for a closed loop)
     start = boundary[0][0]
-    poly = [start]
+    poly_idx = [start]
     prev = None
     curr = start
     while True:
-        nxts = [n for n in adj[curr] if n != prev]
-        if not nxts:
+        nbrs = [n for n in adj[curr] if n != prev]
+        if not nbrs:
             break
-        nxt = nxts[0]
-        poly.append(nxt)
+        nxt = nbrs[0]
+        poly_idx.append(nxt)
         prev, curr = curr, nxt
         if curr == start:
             break
-
-    poly = np.array(poly, dtype=int)
-    poly = np.unique(poly, return_index=True)[1].argsort()  # ensure unique order
-    # Rebuild with original indices
-    ordered_idx = [int(list(set([b for e in boundary for b in e]))[0])]
-    # More robust ordering
-    used = set()
-    ordered = []
-    curr = start
-    prev = None
-    while True:
-        ordered.append(curr)
-        used.add(curr)
-        nxts = [n for n in adj[curr] if n != prev]
-        nxts = [n for n in nxts if n not in used] or [nxts[0] if nxts else start]
-        nxt = nxts[0]
-        prev, curr = curr, nxt
-        if curr == start:
-            break
-
-    return points[np.array(ordered)]
+    return pts[np.array(poly_idx)]
 
 
-# ---------- Plot builder ----------
+# --------------- Fast vectorized point-in-polygon (ray casting) ------------------
+
+def _points_in_polygon(xx: np.ndarray, yy: np.ndarray, poly: np.ndarray) -> np.ndarray:
+    """
+    Return boolean mask of shape xx.shape for points (xx, yy) inside polygon 'poly'.
+    Vectorized ray-casting without third-party deps.
+    """
+    x = xx.ravel()
+    y = yy.ravel()
+    n = len(poly)
+    px = poly[:, 0]
+    py = poly[:, 1]
+
+    inside = np.zeros(x.shape, dtype=bool)
+    j = n - 1
+    for i in range(n):
+        xi, yi = px[i], py[i]
+        xj, yj = px[j], py[j]
+        # edge crosses horizontal ray?
+        cond = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+        inside ^= cond
+        j = i
+    return inside.reshape(xx.shape)
+
+
+# ------------------------------- Plot builder -----------------------------------
 
 def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples: bool) -> go.Figure:
-    """Rasterize scattered points to a grid, mask to concave hull, and draw iso-bands."""
     if df.empty:
         return go.Figure()
 
     x = df["Outreach [m]"].to_numpy()
     y = df["Height [m]"].to_numpy()
     z = df[VALUE_LABEL].to_numpy()
-
     pts = np.column_stack([x, y])
 
-    # Concave hull (alpha in meters ~ controls tightness). 0.25–0.6 usually good.
-    alpha = 0.35
+    # Concave hull to clip colors tightly to the valid region
+    alpha = 0.35  # lower = tighter; tune 0.30–0.45 to best match your manual
     hull_xy = _alpha_shape(pts, alpha=alpha)
 
-    # Build raster canvas
+    # Raster canvas
     x_pad = 0.03 * (x.max() - x.min() + 1e-9)
     y_pad = 0.03 * (y.max() - y.min() + 1e-9)
     xi = np.linspace(x.min() - x_pad, x.max() + x_pad, 400)
     yi = np.linspace(y.min() - y_pad, y.max() + y_pad, 400)
     XI, YI = np.meshgrid(xi, yi)
 
-    # Linear interpolation (no extrapolation)
+    # Interpolate (linear). Outside sample hull remains NaN.
     Z = griddata(points=pts, values=z, xi=(XI, YI), method="linear")
 
-    # Mask outside the concave hull
-    hull_path = Path(hull_xy)
-    mask_flat = hull_path.contains_points(np.column_stack([XI.ravel(), YI.ravel()]))
-    mask = mask_flat.reshape(XI.shape)
+    # Mask outside concave hull (no matplotlib needed)
+    mask = _points_in_polygon(XI, YI, hull_xy)
     Z_masked = np.where(mask, Z, np.nan)
 
     band_step = ISO_LEVELS[1] - ISO_LEVELS[0] if len(ISO_LEVELS) > 1 else 35
     fig = go.Figure()
 
-    # Filled bands
-    fig.add_trace(
-        go.Contour(
-            x=xi,
-            y=yi,
-            z=Z_masked,
-            contours=dict(
-                coloring="fill",
-                showlines=True,
-                start=min(ISO_LEVELS),
-                end=max(ISO_LEVELS),
-                size=band_step,
-            ),
-            colorscale=COLORSCALE,
-            colorbar=dict(title=VALUE_LABEL, tickvals=ISO_LEVELS),
-            line=dict(width=1, color="rgba(0,0,0,0.7)"),
-            hovertemplate=(
-                "Outreach: %{x:.2f} m<br>"
-                "Height: %{y:.2f} m<br>"
-                f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"
-            ),
-            showscale=True,
-        )
-    )
+    fig.add_trace(go.Contour(
+        x=xi, y=yi, z=Z_masked,
+        contours=dict(coloring="fill", showlines=True,
+                      start=min(ISO_LEVELS), end=max(ISO_LEVELS), size=band_step),
+        colorscale=COLORSCALE,
+        colorbar=dict(title=VALUE_LABEL, tickvals=ISO_LEVELS),
+        line=dict(width=1, color="rgba(0,0,0,0.7)"),
+        hovertemplate=("Outreach: %{x:.2f} m<br>"
+                       "Height: %{y:.2f} m<br>"
+                       f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"),
+        showscale=True,
+    ))
 
-    # Optional sample points
     if show_samples:
-        fig.add_trace(
-            go.Scattergl(
-                x=x, y=y, mode="markers",
-                marker=dict(size=3, opacity=0.28),
-                name="Samples", hoverinfo="skip",
-            )
-        )
+        fig.add_trace(go.Scattergl(
+            x=x, y=y, mode="markers",
+            marker=dict(size=3, opacity=0.28),
+            name="Samples", hoverinfo="skip",
+        ))
 
-    # Emphasize 70 t & 105 t isolines
-    for level in (70, 105):
-        fig.add_trace(
-            go.Contour(
-                x=xi, y=yi, z=Z_masked,
-                contours=dict(coloring="none", showlines=True, start=level, end=level, size=1e-6),
-                line=dict(color="#ffd000", width=2.5),
-                showscale=False, hoverinfo="skip",
-                name=f"{level} t line",
-            )
-        )
+    for level in (70, 105):  # emphasize key isolines
+        fig.add_trace(go.Contour(
+            x=xi, y=yi, z=Z_masked,
+            contours=dict(coloring="none", showlines=True, start=level, end=level, size=1e-6),
+            line=dict(color="#ffd000", width=2.5),
+            showscale=False, hoverinfo="skip",
+            name=f"{level} t line",
+        ))
 
-    # Black outer envelope (concave hull)
-    fig.add_trace(
-        go.Scatter(
-            x=np.r_[hull_xy[:, 0], hull_xy[0, 0]],
-            y=np.r_[hull_xy[:, 1], hull_xy[0, 1]],
-            mode="lines",
-            line=dict(color="#1b1b1b", width=2.0),
-            name="Envelope",
-            hoverinfo="skip",
-        )
-    )
+    # Black outer envelope
+    fig.add_trace(go.Scatter(
+        x=np.r_[hull_xy[:, 0], hull_xy[0, 0]],
+        y=np.r_[hull_xy[:, 1], hull_xy[0, 1]],
+        mode="lines",
+        line=dict(color="#1b1b1b", width=2.0),
+        name="Envelope", hoverinfo="skip",
+    ))
 
     fig.update_layout(
         title="Harbour lift — Cdyn = 1.15 (iso-capacity hulls)",
@@ -278,11 +230,10 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
         template="plotly_white",
         height=760, margin=dict(l=40, r=20, t=60, b=40),
     )
-
     return fig
 
 
-# ---------- Dash layout & callbacks ----------
+# ---------------------------- Dash layout + callback ----------------------------
 
 layout = html.Div(
     [
@@ -307,7 +258,6 @@ layout = html.Div(
     ]
 )
 
-
 @callback(
     Output("harbour-cdyn115-contours", "figure"),
     Input("app-config", "data"),
@@ -319,14 +269,13 @@ def update_iso_hulls(config, show_samples_value):
     if mode not in {"linear", "spline"}:
         mode = "linear"
 
-    # 1) XY grid to match Page 1
+    # Align to Page 1 grids
     Xgrid, Ygrid, new_main, new_fold = get_position_grids(config=config, data_dir="data")
 
-    # 2) Interpolate Harbour capacity to the same angle grid, then flatten to XY+value
+    # Interpolate Harbour capacity to the same angle grid
     V_orig = load_value_grid(VALUE_FILE, data_dir="data")
     Vgrid  = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
-    df = flatten_with_values(Xgrid, Ygrid, Vgrid, value_name=VALUE_LABEL)
+    df     = flatten_with_values(Xgrid, Ygrid, Vgrid, value_name=VALUE_LABEL)
 
     show_samples = "on" in (show_samples_value or [])
-    fig = _build_contour_figure(df, include_pedestal=include, show_samples=show_samples)
-    return fig
+    return _build_contour_figure(df, include_pedestal=include, show_samples=show_samples)
