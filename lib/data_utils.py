@@ -124,52 +124,60 @@ def _interp_grid_spline(values: pd.DataFrame, new_main: np.ndarray, new_folding:
 
 
 # ----------------------------------------------------------------------
-# Kinematic (2-link) model
+# Kinematic (2-link) model  — folding joint at end of main
 # ----------------------------------------------------------------------
-def _solve_2link_params_auto(df_points: pd.DataFrame,
-                             sign_candidates=(+1, -1),
-                             dtheta_deg_range=(-5.0, 5.0),
-                             dphi_deg_range=(-5.0, 5.0),
-                             dstep_deg=1.0):
+def _solve_2link_params_auto(
+    df_points: pd.DataFrame,
+    sign_candidates=(+1, -1),
+    base_phase_candidates=(0.0, 180.0),  # 0° = inline forward, 180° = inline folded-back
+    dtheta_deg_range=(-5.0, 5.0),
+    dphi_deg_range=(-5.0, 5.0),
+    dstep_deg=1.0,
+):
     """
-    Auto-fit L1, L2, x0, y0 and zero-offsets dtheta,dphi and sign of phi.
-    df_points must have: main_deg, folding_deg, Outreach [m], Height [m]
+    Auto-fit L1, L2, x0, y0 and zero-offsets dtheta,dphi, and the sign & base phase of phi.
+    df_points must have: main_deg, folding_deg, Outreach [m], Height [m]  (NO pedestal added)
     """
     th0 = df_points["main_deg"].to_numpy()
     ph0 = df_points["folding_deg"].to_numpy()
-    x = df_points["Outreach [m]"].to_numpy()
-    y = df_points["Height [m]"].to_numpy()
+    x   = df_points["Outreach [m]"].to_numpy()
+    y   = df_points["Height [m]"].to_numpy()
 
     best = None
 
     dth_vals = np.arange(dtheta_deg_range[0], dtheta_deg_range[1] + 1e-9, dstep_deg)
     dph_vals = np.arange(dphi_deg_range[0], dphi_deg_range[1] + 1e-9, dstep_deg)
 
-    for s in sign_candidates:
-        for dth in dth_vals:
-            for dph in dph_vals:
-                th = np.deg2rad(th0 + dth)
-                ph = np.deg2rad(ph0 + dph)
+    for base_phase in base_phase_candidates:          # 0° or 180°
+        base_rad = np.deg2rad(base_phase)
+        for s in sign_candidates:                      # +1 or -1
+            for dth in dth_vals:
+                for dph in dph_vals:
+                    th = np.deg2rad(th0 + dth)
+                    ph = np.deg2rad(ph0 + dph)
 
-                cth, sth = np.cos(th), np.sin(th)
-                ctp, stp = np.cos(th + s * ph), np.sin(th + s * ph)
+                    # Folding link global angle = θ + base_phase + s * φ
+                    cth, sth = np.cos(th), np.sin(th)
+                    ctp, stp = np.cos(th + base_rad + s * ph), np.sin(th + base_rad + s * ph)
 
-                Ax = np.column_stack([cth, ctp, np.ones_like(x), np.zeros_like(x)])
-                Ay = np.column_stack([sth, stp, np.zeros_like(y), np.ones_like(y)])
-                A = np.vstack([Ax, Ay])
-                b = np.concatenate([x, y])
+                    # Linear system for [L1, L2, x0, y0]
+                    Ax = np.column_stack([cth,  ctp,  np.ones_like(x), np.zeros_like(x)])
+                    Ay = np.column_stack([sth,  stp,  np.zeros_like(y), np.ones_like(y)])
+                    A  = np.vstack([Ax, Ay])
+                    b  = np.concatenate([x, y])
 
-                params, *_ = np.linalg.lstsq(A, b, rcond=None)
-                L1, L2, x0, y0 = params
+                    params, *_ = np.linalg.lstsq(A, b, rcond=None)
+                    L1, L2, x0, y0 = params
 
-                x_fit = L1 * cth + L2 * ctp + x0
-                y_fit = L1 * sth + L2 * stp + y0
-                rms = np.sqrt(np.mean((x_fit - x) ** 2 + (y_fit - y) ** 2))
+                    x_fit = L1 * cth + L2 * ctp + x0
+                    y_fit = L1 * sth + L2 * stp + y0
+                    rms = np.sqrt(np.mean((x_fit - x) ** 2 + (y_fit - y) ** 2))
 
-                if best is None or rms < best[0]:
-                    best = (rms, dict(L1=float(L1), L2=float(L2),
-                                      x0=float(x0), y0=float(y0),
-                                      s=int(s), dtheta=float(dth), dphi=float(dph)))
+                    if (best is None) or (rms < best[0]):
+                        best = (rms, dict(
+                            L1=float(L1), L2=float(L2), x0=float(x0), y0=float(y0),
+                            s=int(s), dtheta=float(dth), dphi=float(dph), base_phase=float(base_phase)
+                        ))
     return best  # (rms, params)
 
 
@@ -181,13 +189,15 @@ def _forward_2link_evaluate(main_deg: np.ndarray, fold_deg: np.ndarray, params: 
     L1 = params["L1"]; L2 = params["L2"]
     x0 = params["x0"]; y0 = params["y0"]
     s = params["s"]; dth = params["dtheta"]; dph = params["dphi"]
+    base = np.deg2rad(params.get("base_phase", 0.0))
 
     TH, PH = np.meshgrid(main_deg, fold_deg)
     th = np.deg2rad(TH + dth)
     ph = np.deg2rad(PH + dph)
 
-    x = L1 * np.cos(th) + L2 * np.cos(th + s * ph) + x0
-    y = L1 * np.sin(th) + L2 * np.sin(th + s * ph) + y0
+    # Folding link global angle = θ + base + s*φ
+    x = L1 * np.cos(th) + L2 * np.cos(th + base + s * ph) + x0
+    y = L1 * np.sin(th) + L2 * np.sin(th + base + s * ph) + y0
 
     return pd.DataFrame(x, index=fold_deg, columns=main_deg), pd.DataFrame(y, index=fold_deg, columns=main_deg)
 
@@ -211,8 +221,17 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
 
     # --- Kinematic mode (2-link circular) --------------------------------
     if mode == "kinematic":
+        # Fit on ORIGINAL heights (no pedestal)
         df_orig = _flatten(outreach_grid, height_grid)
-        rms, params = _solve_2link_params_auto(df_orig)
+        rms, params = _solve_2link_params_auto(
+            df_orig,
+            # keep defaults; adjust ranges if needed
+            sign_candidates=(+1, -1),
+            base_phase_candidates=(0.0, 180.0),
+            dtheta_deg_range=(-5.0, 5.0),
+            dphi_deg_range=(-5.0, 5.0),
+            dstep_deg=1.0,
+        )
 
         Xgrid, Ygrid = _forward_2link_evaluate(new_main, new_fold, params)
 
