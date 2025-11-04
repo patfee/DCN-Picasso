@@ -29,7 +29,6 @@ COLORSCALE = [
 ]
 
 # Discrete legend swatches for the bands between ISO_LEVELS
-# (length should be len(ISO_LEVELS)-1)
 BAND_COLORS = ["#00b3c6", "#9ecf2a", "#ffcc33", "#ff8840"]
 
 
@@ -68,9 +67,25 @@ def _legend_card() -> dbc.Card:
 
 def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples: bool) -> go.Figure:
     """Rasterize scattered points to a regular XY grid and draw filled iso-bands."""
+    if df.empty:
+        return go.Figure()
+
     x = df["Outreach [m]"].to_numpy()
     y = df["Height [m]"].to_numpy()
     z = df[VALUE_LABEL].to_numpy()
+
+    # Guard: need at least 3 points for triangulation
+    if len(x) < 3:
+        fig = go.Figure()
+        fig.update_layout(
+            title="Harbour lift — Cdyn = 1.15 (iso-capacity hulls)",
+            xaxis_title="Outreach [m]",
+            yaxis_title=("Jib head above deck level [m]" if include_pedestal
+                         else "Jib head above pedestal flange [m]"),
+            template="plotly_white",
+            height=760, margin=dict(l=40, r=20, t=60, b=40),
+        )
+        return fig
 
     # Define rectilinear canvas
     x_pad = 0.03 * (x.max() - x.min() + 1e-9)
@@ -102,7 +117,7 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
         line=dict(width=1),
         hovertemplate=("Outreach: %{x:.2f} m<br>"
                        "Height: %{y:.2f} m<br>"
-                       f"{VALUE_LABEL}: %{z:.1f}<extra></extra>"),
+                       f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"),  # NOTE: double braces around z
         showscale=True,
         name="Iso-bands",
     ))
