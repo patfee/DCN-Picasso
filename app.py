@@ -6,7 +6,10 @@ import dash_bootstrap_components as dbc
 # Import page modules
 from pages import page1, page2, page3
 
-# Flask + Dash
+
+# ----------------------------------------------------------------------
+# Flask + Dash setup
+# ----------------------------------------------------------------------
 server = Flask(__name__)
 app = Dash(
     __name__,
@@ -16,7 +19,10 @@ app = Dash(
     title="My Application 2"
 )
 
-# Sidebar (left)
+
+# ----------------------------------------------------------------------
+# Sidebar
+# ----------------------------------------------------------------------
 sidebar = html.Div(
     [
         html.H5("Menu"),
@@ -35,31 +41,41 @@ sidebar = html.Div(
     className="bg-light border-end p-3 h-100"
 )
 
-# Main content area (includes session store for global config)
+
+# ----------------------------------------------------------------------
+# Main content area
+# ----------------------------------------------------------------------
 content = html.Div(
     [
-        # Session-scoped app configuration (shared across all pages)
+        # Global session-scoped store for pedestal + interpolation settings
         dcc.Store(
             id="app-config",
             storage_type="session",
             data={
-                "include_pedestal": False,  # default off
-                "pedestal_height": 6.0,     # default 6 m
+                "include_pedestal": False,  # pedestal toggle
+                "pedestal_height": 6.0,     # pedestal height in meters
+                "main_factor": 1,           # main-jib interpolation factor
+                "folding_factor": 1,        # folding-jib interpolation factor
             },
         ),
+
+        # Header + dynamic page content
         html.Div(
             [
                 html.H3("My Application 2", className="mb-3"),
                 dcc.Location(id="url"),
-                html.Div(id="page-content")
+                html.Div(id="page-content"),
             ],
             className="p-3"
-        )
+        ),
     ],
     className="h-100"
 )
 
-# Overall layout: sidebar + main content
+
+# ----------------------------------------------------------------------
+# Overall page layout (sidebar + main area)
+# ----------------------------------------------------------------------
 app.layout = dbc.Container(
     dbc.Row(
         [
@@ -71,9 +87,10 @@ app.layout = dbc.Container(
     fluid=True
 )
 
-# -------------------------------
+
+# ----------------------------------------------------------------------
 # Routing between main pages
-# -------------------------------
+# ----------------------------------------------------------------------
 @app.callback(Output("page-content", "children"), Input("url", "pathname"))
 def render_page_content(pathname):
     if pathname in ("/", "/page1"):
@@ -85,9 +102,9 @@ def render_page_content(pathname):
     return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
 
 
-# -------------------------------
+# ----------------------------------------------------------------------
 # Run locally on port 3000
-# -------------------------------
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "3000"))
     app.run_server(host="0.0.0.0", port=port, debug=True)
