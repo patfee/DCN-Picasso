@@ -39,6 +39,5 @@
 .tab-wrap { margin-top: 12px; }
 
 /* Show a waiting cursor while the Loading overlay is visible */
-.loading-progress {
-  cursor: progress !important;
-}
+/* assets/styles.css */
+.loading-progress { cursor: progress !important; }
