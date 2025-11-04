@@ -153,3 +153,85 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
         Ygrid = Ygrid + pedestal
 
     return _flatten(Xgrid, Ygrid)
+
+
+
+# ==== collor plot height outreach load =========================
+
+def load_value_grid(filename: str, data_dir: str = "data") -> pd.DataFrame:
+    """
+    Load an angle-indexed value grid (e.g., Harbour_Cdyn115.csv)
+    with rows=folding_deg, cols=main_deg. Same CSV layout as outreach/height.
+    """
+    path = os.path.join(data_dir, filename)
+    return _read_angle_grid(path)
+
+
+def get_position_grids(config: dict | None = None, data_dir: str = "data"):
+    """
+    Build the X/Y grids for the currently selected interpolation factors/mode,
+    returning (Xgrid, Ygrid, new_main, new_fold).
+
+    - Uses pedestal toggle (adds to Y if enabled)
+    - Matches the angle grid you see on Page 1 Tab A
+    """
+    outreach_grid, height_grid = load_crane_grids(data_dir)
+
+    include = bool(config.get("include_pedestal", False)) if config else False
+    pedestal = float(config.get("pedestal_height", 6.0)) if config else 6.0
+    main_factor = int(config.get("main_factor", 1)) if config else 1
+    folding_factor = int(config.get("folding_factor", 1)) if config else 1
+    mode = (config.get("interp_mode") or "linear").lower() if config else "linear"
+    if mode not in {"linear", "spline"}:
+        mode = "linear"
+
+    orig_main = outreach_grid.columns.to_numpy(dtype=float)
+    orig_fold = outreach_grid.index.to_numpy(dtype=float)
+    new_main = _subdivide_angles(orig_main, main_factor)
+    new_fold = _subdivide_angles(orig_fold, folding_factor)
+
+    if mode == "spline":
+        Xgrid = _interp_grid_spline(outreach_grid, new_main, new_fold)
+        Ygrid = _interp_grid_spline(height_grid,   new_main, new_fold)
+    else:
+        Xgrid = _interp_grid_linear(outreach_grid, new_main, new_fold)
+        Ygrid = _interp_grid_linear(height_grid,   new_main, new_fold)
+
+    if include:
+        Ygrid = Ygrid + pedestal
+
+    return Xgrid, Ygrid, new_main, new_fold
+
+
+def interpolate_value_grid(values_grid: pd.DataFrame,
+                           new_main: np.ndarray,
+                           new_fold: np.ndarray,
+                           mode: str = "linear") -> pd.DataFrame:
+    """
+    Interpolate an angle-based value grid to (new_fold × new_main) using the
+    selected interpolation mode (linear/spline).
+    """
+    mode = (mode or "linear").lower()
+    if mode not in {"linear", "spline"}:
+        mode = "linear"
+
+    if mode == "spline":
+        return _interp_grid_spline(values_grid, new_main, new_fold)
+    else:
+        return _interp_grid_linear(values_grid, new_main, new_fold)
+
+
+def flatten_with_values(Xgrid: pd.DataFrame,
+                        Ygrid: pd.DataFrame,
+                        Vgrid: pd.DataFrame,
+                        value_name: str = "Value") -> pd.DataFrame:
+    """
+    Flatten X, Y and a value grid to a single dataframe with:
+    ['Outreach [m]', 'Height [m]', 'main_deg', 'folding_deg', value_name]
+    """
+    df_xy = _flatten(Xgrid, Ygrid)
+    V = Vgrid.stack().rename(value_name).reset_index()
+    V.columns = ["folding_deg", "main_deg", value_name]
+    df = pd.merge(df_xy, V, on=["folding_deg", "main_deg"], how="inner")
+    return df
+
