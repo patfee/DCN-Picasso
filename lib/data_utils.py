@@ -11,7 +11,7 @@ def _read_angle_grid(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Missing file: {path}")
 
-    # detect delimiter
+    # Detect delimiter
     with open(path, "r", newline="") as f:
         sample = f.read(2048)
         if ";" in sample:
@@ -124,18 +124,19 @@ def _interp_grid_spline(values: pd.DataFrame, new_main: np.ndarray, new_folding:
 
 
 # ----------------------------------------------------------------------
-# Kinematic (2-link) model  — folding joint at end of main
+# Kinematic (2-link) model — folding joint at end of main
 # ----------------------------------------------------------------------
 def _solve_2link_params_auto(
     df_points: pd.DataFrame,
+    beta_range_deg=(0.0, 360.0),     # <- base phase β scan (degrees)
+    beta_step_deg=2.0,
     sign_candidates=(+1, -1),
-    base_phase_candidates=(0.0, 180.0),  # 0° = inline forward, 180° = inline folded-back
     dtheta_deg_range=(-5.0, 5.0),
     dphi_deg_range=(-5.0, 5.0),
     dstep_deg=1.0,
 ):
     """
-    Auto-fit L1, L2, x0, y0 and zero-offsets dtheta,dphi, and the sign & base phase of phi.
+    Auto-fit L1, L2, x0, y0 and zero-offsets dtheta,dphi, sign s, and base phase β.
     df_points must have: main_deg, folding_deg, Outreach [m], Height [m]  (NO pedestal added)
     """
     th0 = df_points["main_deg"].to_numpy()
@@ -145,20 +146,22 @@ def _solve_2link_params_auto(
 
     best = None
 
+    betas = np.arange(beta_range_deg[0], beta_range_deg[1] + 1e-9, beta_step_deg)
     dth_vals = np.arange(dtheta_deg_range[0], dtheta_deg_range[1] + 1e-9, dstep_deg)
     dph_vals = np.arange(dphi_deg_range[0], dphi_deg_range[1] + 1e-9, dstep_deg)
 
-    for base_phase in base_phase_candidates:          # 0° or 180°
-        base_rad = np.deg2rad(base_phase)
-        for s in sign_candidates:                      # +1 or -1
+    for beta_deg in betas:
+        base = np.deg2rad(beta_deg)
+        for s in sign_candidates:
             for dth in dth_vals:
                 for dph in dph_vals:
                     th = np.deg2rad(th0 + dth)
                     ph = np.deg2rad(ph0 + dph)
 
-                    # Folding link global angle = θ + base_phase + s * φ
+                    # Main global angle = th
+                    # Folding global angle = th + base + s*ph
                     cth, sth = np.cos(th), np.sin(th)
-                    ctp, stp = np.cos(th + base_rad + s * ph), np.sin(th + base_rad + s * ph)
+                    ctp, stp = np.cos(th + base + s * ph), np.sin(th + base + s * ph)
 
                     # Linear system for [L1, L2, x0, y0]
                     Ax = np.column_stack([cth,  ctp,  np.ones_like(x), np.zeros_like(x)])
@@ -175,8 +178,10 @@ def _solve_2link_params_auto(
 
                     if (best is None) or (rms < best[0]):
                         best = (rms, dict(
-                            L1=float(L1), L2=float(L2), x0=float(x0), y0=float(y0),
-                            s=int(s), dtheta=float(dth), dphi=float(dph), base_phase=float(base_phase)
+                            L1=float(L1), L2=float(L2),
+                            x0=float(x0), y0=float(y0),
+                            s=int(s), dtheta=float(dth), dphi=float(dph),
+                            base_phase=float(beta_deg)
                         ))
     return best  # (rms, params)
 
@@ -195,7 +200,7 @@ def _forward_2link_evaluate(main_deg: np.ndarray, fold_deg: np.ndarray, params: 
     th = np.deg2rad(TH + dth)
     ph = np.deg2rad(PH + dph)
 
-    # Folding link global angle = θ + base + s*φ
+    # Folding link global angle = θ + β + s*φ
     x = L1 * np.cos(th) + L2 * np.cos(th + base + s * ph) + x0
     y = L1 * np.sin(th) + L2 * np.sin(th + base + s * ph) + y0
 
@@ -221,13 +226,14 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
 
     # --- Kinematic mode (2-link circular) --------------------------------
     if mode == "kinematic":
-        # Fit on ORIGINAL heights (no pedestal)
+        # Fit on ORIGINAL grids (no pedestal in the fit)
         df_orig = _flatten(outreach_grid, height_grid)
+
         rms, params = _solve_2link_params_auto(
             df_orig,
-            # keep defaults; adjust ranges if needed
+            beta_range_deg=(0.0, 360.0),   # <-- wide search for β; adjust step if needed
+            beta_step_deg=2.0,
             sign_candidates=(+1, -1),
-            base_phase_candidates=(0.0, 180.0),
             dtheta_deg_range=(-5.0, 5.0),
             dphi_deg_range=(-5.0, 5.0),
             dstep_deg=1.0,
@@ -239,6 +245,7 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
             Ygrid = Ygrid + pedestal
 
         df = _flatten(Xgrid, Ygrid)
+        # Keep fit diagnostics available to the page if you want to display them
         df.attrs["fit_rms"] = rms
         df.attrs["fit_params"] = params
         return df
