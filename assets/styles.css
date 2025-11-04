@@ -37,3 +37,8 @@
 .app-content { grid-area: content; padding: 16px; overflow: auto; }
 .page-wrap { display: flex; flex-direction: column; gap: 12px; }
 .tab-wrap { margin-top: 12px; }
+
+/* Show a waiting cursor while the Loading overlay is visible */
+.loading-progress {
+  cursor: progress !important;
+}
