@@ -1,18 +1,17 @@
 from dash import html, dcc
 import plotly.graph_objs as go
-from lib.data_utils import load_crane_data
+from lib.data_utils import load_crane_points
 
-# Load once (small CSVs); if you want hot-reload, move this into a callback later
-df = load_crane_data()
+df = load_crane_points()
 
+# Scatter points (you can add hull/outline later)
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=df["Outreach [m]"],
     y=df["Height [m]"],
-    mode="markers+lines",
+    mode="markers",
     marker=dict(size=6),
-    line=dict(width=1.5),
-    name="Main Hoist"
+    name="Data points"
 ))
 
 fig.update_layout(
@@ -20,8 +19,15 @@ fig.update_layout(
     xaxis_title="Outreach [m]",
     yaxis_title="Jib head above pedestal flange [m]",
     template="plotly_white",
-    height=650,
+    height=700,
 )
+
+# Optional: set sensible ranges from data (respects negatives)
+if not df.empty:
+    xpad = max(1.0, 0.03 * (df["Outreach [m]"].max() - df["Outreach [m]"].min()))
+    ypad = max(1.0, 0.03 * (df["Height [m]"].max() - df["Height [m]"].min()))
+    fig.update_xaxes(range=[df["Outreach [m]"].min() - xpad, df["Outreach [m]"].max() + xpad], zeroline=True)
+    fig.update_yaxes(range=[df["Height [m]"].min() - ypad, df["Height [m]"].max() + ypad], zeroline=True)
 
 layout = html.Div(
     [
