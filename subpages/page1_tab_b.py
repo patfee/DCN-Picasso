@@ -2,22 +2,17 @@ import dash
 dash.register_page(__name__, path="/page-1/sub-b", name="Page 1 – Sub B")
 
 from dash import html, dcc
-
-# --- default layout so Dash always exports something ---
 layout = html.Div([
     html.H4("Page 1 – Sub B : Tabular data points Main Hoist"),
     html.P("Initializing … Please wait or check /data CSV files if this persists.")
 ])
 
-# --- main body guarded so startup never breaks ---
 try:
     from dash import Input, Output
     import numpy as np
     import pandas as pd
     import plotly.graph_objects as go
     from scipy.spatial import ConvexHull
-
-    # Optional libs (safe import)
     try:
         import alphashape
         from shapely.geometry import MultiPoint
@@ -26,15 +21,12 @@ try:
     except Exception:
         _HAS_ALPHASHAPE = False
 
-    # Your helpers
     from lib.data_utils import load_matrix_csv_flexible
     from lib.geo_utils import build_interpolators, resample_grid_by_factors
 
-    # ---------------- Settings ----------------
     HEIGHT_CANDIDATES = ("height.csv", "Height.csv")
     OUTREACH_CANDIDATES = ("outreach.csv", "Outreach.csv")
 
-    # ---------------- Data load ----------------
     height_df = load_matrix_csv_flexible(HEIGHT_CANDIDATES)
     outreach_df = load_matrix_csv_flexible(OUTREACH_CANDIDATES)
 
@@ -47,17 +39,13 @@ try:
             )
         ])
     else:
-        # Interpolators
         f_angles, m_angles, height_itp, outre_itp, _ = build_interpolators(
             height_df, outreach_df, pd.DataFrame()
         )
-
-        # Originals
         F0, M0 = np.meshgrid(f_angles, m_angles, indexing="ij")
         orig_xy = np.column_stack([outreach_df.values.ravel(), height_df.values.ravel()])
         orig_custom = np.column_stack([F0.ravel(), M0.ravel()])
 
-        # --------------- Helper: outline ---------------
         def _safe_outline(points, concavity_scale=1.0):
             pts = np.asarray(points, float)
             pts = pts[np.isfinite(pts).all(axis=1)]
@@ -84,7 +72,6 @@ try:
             except Exception:
                 return None
 
-        # --------------- Layout ----------------
         layout = html.Div(
             className="tab-wrap",
             children=[
@@ -99,31 +86,28 @@ try:
                                     id="p1b-main-factor",
                                     options=[{"label": f"{o}× per-interval" + (" (original)" if o == 1 else ""), "value": o}
                                              for o in [1, 2, 4, 8]],
-                                    value=1, clearable=False, style={"marginBottom":"10px"}
-                                ),
+                                    value=1, clearable=False),
                                 html.Label("Folding-jib subdivision", style={"fontWeight": 600}),
                                 dcc.Dropdown(
                                     id="p1b-fold-factor",
                                     options=[{"label": f"{o}× per-interval" + (" (original)" if o == 1 else ""), "value": o}
                                              for o in [1, 2, 4, 8, 16]],
-                                    value=1, clearable=False, style={"marginBottom":"10px"}
-                                ),
+                                    value=1, clearable=False),
                                 html.Label("Concavity scale (outline tightening)"),
                                 dcc.Slider(0.6, 1.8, step=0.05, value=1.0, id="p1b-concavity"),
                             ],
-                            style={"minWidth":"260px","maxWidth":"360px","paddingRight":"12px"}
+                            style={"minWidth": "260px", "maxWidth": "360px", "paddingRight": "12px"}
                         ),
                         dcc.Loading(
-                            dcc.Graph(id="p1b-graph", style={"height":"820px"}),
-                            type="dot",
+                            dcc.Graph(id="p1b-graph", style={"height": "820px"}),
+                            type="dot"
                         ),
                     ],
                 ),
-                html.Div(id="p1b-range-info", style={"fontFamily":"monospace","marginTop":"8px"}),
+                html.Div(id="p1b-range-info", style={"fontFamily": "monospace", "marginTop": "8px"}),
             ],
         )
 
-        # --------------- Callback ---------------
         @dash.callback(
             Output("p1b-graph", "figure"),
             Output("p1b-range-info", "children"),
@@ -135,20 +119,16 @@ try:
         def _update_chart(main_factor, fold_factor, concavity_scale):
             main_factor = int(main_factor or 1)
             fold_factor = int(fold_factor or 1)
-
             F_dense, M_dense, R_dense, H_dense, pts = resample_grid_by_factors(
-                f_angles, m_angles, fold_factor, main_factor,
-                height_itp=height_itp, outre_itp=outre_itp
+                f_angles, m_angles, fold_factor, main_factor
             )
             dense_xy = np.column_stack([R_dense, H_dense])
             dense_xy = dense_xy[~np.isnan(dense_xy).any(axis=1)]
 
             fig = go.Figure()
-
-            # Interpolated points
             if dense_xy.size:
                 fig.add_trace(go.Scatter(
-                    x=dense_xy[:,0], y=dense_xy[:,1],
+                    x=dense_xy[:, 0], y=dense_xy[:, 1],
                     mode="markers",
                     marker=dict(size=4, symbol="diamond", opacity=0.45, color="royalblue"),
                     name="Subdivision points",
@@ -160,11 +140,9 @@ try:
                         "Jib head above pedestal flange: %{y:.2f} m<extra></extra>"
                     )
                 ))
-
-            # Original points
             if orig_xy.size:
                 fig.add_trace(go.Scatter(
-                    x=orig_xy[:,0], y=orig_xy[:,1],
+                    x=orig_xy[:, 0], y=orig_xy[:, 1],
                     mode="markers",
                     marker=dict(size=7, color="midnightblue"),
                     name="Original matrix points",
@@ -176,28 +154,22 @@ try:
                         "Jib head above pedestal flange: %{y:.2f} m<extra></extra>"
                     )
                 ))
-
-            # Outline
-            outline = _safe_outline(orig_xy, concavity_scale=float(concavity_scale or 1.0))
+            outline = _safe_outline(orig_xy, concavity_scale)
             if outline is not None and outline.size:
                 fig.add_trace(go.Scatter(
-                    x=outline[:,0], y=outline[:,1],
+                    x=outline[:, 0], y=outline[:, 1],
                     mode="lines+markers",
                     line=dict(color="midnightblue", width=2),
                     marker=dict(size=5, color="midnightblue"),
                     name="Envelope"
                 ))
-
             fig.update_layout(
-                title=dict(text="<b>Tabular data points Main Hoist</b>", x=0.5, xanchor="center"),
-                xaxis=dict(title="Outreach [m]", gridcolor="#D9D9D9", zeroline=True),
+                title=dict(text="<b>Tabular data points Main Hoist</b>", x=0.5),
+                xaxis=dict(title="Outreach [m]", gridcolor="#D9D9D9"),
                 yaxis=dict(title="Jib head above pedestal flange [m]", gridcolor="#D9D9D9"),
                 plot_bgcolor="white",
-                hovermode="closest",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=40, r=20, t=60, b=40)
+                hovermode="closest"
             )
-
             info = (
                 f"Main-jib subdivision: {main_factor}× • "
                 f"Folding-jib subdivision: {fold_factor}× • "
@@ -207,12 +179,7 @@ try:
             return fig, info
 
 except Exception as e:
-    # Failsafe layout
     layout = html.Div([
         html.H4("Page 1 – Sub B : Tabular data points Main Hoist"),
-        html.Pre(
-            f"Failed to initialize Sub B.\n\nReason: {type(e).__name__}: {e}\n"
-            "Check that /data/height.csv and /data/outreach.csv exist and optional "
-            "libraries (shapely, alphashape) are installed."
-        )
+        html.Pre(f"Failed to initialize Sub B.\nReason: {type(e).__name__}: {e}")
     ])
