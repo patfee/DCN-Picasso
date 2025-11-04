@@ -1,7 +1,11 @@
 import os
 import csv
 import pandas as pd
+from functools import lru_cache
 
+# =========================
+# Core CSV/Angle-grid loader
+# =========================
 
 def _read_angle_grid(path: str) -> pd.DataFrame:
     """
@@ -55,42 +59,63 @@ def _read_angle_grid(path: str) -> pd.DataFrame:
     return body
 
 
+@lru_cache(maxsize=1)
 def load_crane_grids(data_dir: str = "data"):
     """
-    Loads outreach and height angle grids.
+    Loads outreach and height angle grids (cached).
     Returns:
       outreach_grid: DataFrame [folding_deg x main_deg] -> Outreach [m]
-      height_grid  : DataFrame [folding_deg x main_deg] -> Height [m]
+      height_grid  : DataFrame [folding_deg x main_deg] -> Height [m] (above pedestal flange)
     """
     outreach_grid = _read_angle_grid(os.path.join(data_dir, "outreach.csv"))
     height_grid   = _read_angle_grid(os.path.join(data_dir, "height.csv"))
 
-    # Safety: align on common angles
+    # Align on common angles
     common_rows = outreach_grid.index.intersection(height_grid.index)
     common_cols = outreach_grid.columns.intersection(height_grid.columns)
     outreach_grid = outreach_grid.loc[common_rows, common_cols]
     height_grid   = height_grid.loc[common_rows, common_cols]
-
     return outreach_grid, height_grid
 
 
-def load_crane_points(data_dir: str = "data") -> pd.DataFrame:
+def _flatten_grids(outreach_grid: pd.DataFrame, height_grid: pd.DataFrame) -> pd.DataFrame:
     """
-    Flattens the two angle grids into a tidy table of paired (Outreach, Height).
-    Columns:
-      - folding_deg
-      - main_deg
-      - Outreach [m]
-      - Height  [m]
+    Pair the two grids into a tidy table.
     """
-    Xgrid, Ygrid = load_crane_grids(data_dir)
-    # Stack -> long form with a MultiIndex (folding_deg, main_deg)
-    X_long = Xgrid.stack().rename("Outreach [m]").reset_index()
+    X_long = outreach_grid.stack().rename("Outreach [m]").reset_index()
     X_long.columns = ["folding_deg", "main_deg", "Outreach [m]"]
 
-    Y_long = Ygrid.stack().rename("Height [m]").reset_index()
+    Y_long = height_grid.stack().rename("Height [m]").reset_index()
     Y_long.columns = ["folding_deg", "main_deg", "Height [m]"]
 
     df = pd.merge(X_long, Y_long, on=["folding_deg", "main_deg"], how="inner")
-    df = df.dropna(subset=["Outreach [m]", "Height [m]"]).reset_index(drop=True)
+    return df.dropna(subset=["Outreach [m]", "Height [m]"]).reset_index(drop=True)
+
+
+# ======================================
+# Global "effective dataset" construction
+# ======================================
+
+def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.DataFrame:
+    """
+    Returns the *effective* dataset for the whole application, based on a config dict:
+      config = {
+        "include_pedestal": bool,
+        "pedestal_height": float,   # meters
+      }
+
+    The returned DataFrame ALWAYS exposes the column name "Height [m]" so downstream
+    code doesn't need to change. If pedestal is included, we add it to the baseline
+    heights before returning.
+    """
+    outreach_grid, height_grid = load_crane_grids(data_dir)
+    df = _flatten_grids(outreach_grid, height_grid)
+
+    include = bool(config.get("include_pedestal", False)) if config else False
+    pedestal = float(config.get("pedestal_height", 6.0)) if config else 6.0
+
+    if include:
+        df = df.copy()
+        df["Height [m]"] = df["Height [m]"] + pedestal
+
     return df
