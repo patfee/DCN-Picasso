@@ -79,3 +79,18 @@ def load_crane_points(data_dir: str = "data") -> pd.DataFrame:
     Flattens the two angle grids into a tidy table of paired (Outreach, Height).
     Columns:
       - folding_deg
+      - main_deg
+      - Outreach [m]
+      - Height  [m]
+    """
+    Xgrid, Ygrid = load_crane_grids(data_dir)
+    # Stack -> long form with a MultiIndex (folding_deg, main_deg)
+    X_long = Xgrid.stack().rename("Outreach [m]").reset_index()
+    X_long.columns = ["folding_deg", "main_deg", "Outreach [m]"]
+
+    Y_long = Ygrid.stack().rename("Height [m]").reset_index()
+    Y_long.columns = ["folding_deg", "main_deg", "Height [m]"]
+
+    df = pd.merge(X_long, Y_long, on=["folding_deg", "main_deg"], how="inner")
+    df = df.dropna(subset=["Outreach [m]", "Height [m]"]).reset_index(drop=True)
+    return df
