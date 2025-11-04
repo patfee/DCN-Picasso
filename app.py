@@ -16,7 +16,7 @@ app = Dash(
     server=server,
     suppress_callback_exceptions=True,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="My Application 2"
+    title="DCN Picasso Engineering Data"
 )
 
 
@@ -36,7 +36,7 @@ sidebar = html.Div(
             vertical=True,
             pills=True,
         ),
-        html.Div("© Your Company", className="mt-4 small text-muted"),
+        html.Div("© DCN Diving B.V", className="mt-4 small text-muted"),
     ],
     className="bg-light border-end p-3 h-100"
 )
@@ -52,11 +52,12 @@ content = html.Div(
             id="app-config",
             storage_type="session",
             data={
-                "include_pedestal": False,  # pedestal toggle
-                "pedestal_height": 6.0,     # pedestal height in meters
-                "main_factor": 1,           # main-jib interpolation factor
-                "folding_factor": 1,        # folding-jib interpolation factor
-            },
+                "include_pedestal": False,
+                "pedestal_height": 6.0,
+                "main_factor": 1,
+                "folding_factor": 1,
+                "interp_mode": "linear",  # new
+                },
         ),
 
         # Header + dynamic page content
