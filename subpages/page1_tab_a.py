@@ -7,7 +7,7 @@ from lib.data_utils import get_crane_points
 
 
 # ----------------------------------------------------------------------
-# UI option lists
+# UI option lists (kinematic removed)
 # ----------------------------------------------------------------------
 MAIN_OPTIONS = [
     {"label": "1× per-interval (original)", "value": 1},
@@ -19,9 +19,8 @@ MAIN_OPTIONS = [
 FOLD_OPTIONS = MAIN_OPTIONS + [{"label": "32× per-interval", "value": 32}]
 
 MODE_OPTIONS = [
-    {"label": "Linear (bilinear)",         "value": "linear"},
-    {"label": "Spline (smoother)",         "value": "spline"},
-    {"label": "Kinematic (2-link model)",  "value": "kinematic"},
+    {"label": "Linear (bilinear)", "value": "linear"},
+    {"label": "Spline (smoother)", "value": "spline"},
 ]
 
 
@@ -29,18 +28,15 @@ MODE_OPTIONS = [
 # Helpers
 # ----------------------------------------------------------------------
 def _format_df_for_view(df: pd.DataFrame, include_pedestal: bool) -> pd.DataFrame:
-    """Prepare a user-facing table: order/round columns and label Height based on pedestal toggle."""
     dfv = df[["Outreach [m]", "Height [m]", "main_deg", "folding_deg"]].copy()
     dfv["Outreach [m]"] = dfv["Outreach [m]"].round(2)
     dfv["Height [m]"]   = dfv["Height [m]"].round(2)
     dfv["main_deg"]     = dfv["main_deg"].round(2)
     dfv["folding_deg"]  = dfv["folding_deg"].round(2)
-
     dfv = dfv.rename(columns={
         "main_deg": "Main jib [°]",
         "folding_deg": "Folding jib [°]",
     })
-
     if include_pedestal:
         dfv = dfv.rename(columns={"Height [m]": "Height [m] (deck level)"})
     else:
@@ -49,9 +45,7 @@ def _format_df_for_view(df: pd.DataFrame, include_pedestal: bool) -> pd.DataFram
 
 
 def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
-    """Build scatter plot with rich hover: values + angles."""
     custom = np.stack([df["main_deg"].to_numpy(), df["folding_deg"].to_numpy()], axis=-1)
-
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["Outreach [m]"],
@@ -65,7 +59,6 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
             "Main Jib: %{customdata[0]:.2f}° — Folding Jib: %{customdata[1]:.2f}°"
         )
     ))
-
     fig.update_layout(
         title="Tabular data points Main Hoist",
         xaxis_title="Outreach [m]",
@@ -75,7 +68,6 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
         height=720,
         margin=dict(l=40, r=20, t=60, b=40),
     )
-
     if not df.empty:
         x_min, x_max = df["Outreach [m]"].min(), df["Outreach [m]"].max()
         y_min, y_max = df["Height [m]"].min(),   df["Height [m]"].max()
@@ -83,7 +75,6 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
         y_pad = max(0.5, 0.03 * (y_max - y_min))
         fig.update_xaxes(range=[x_min - x_pad, x_max + x_pad], zeroline=True)
         fig.update_yaxes(range=[y_min - y_pad, y_max + y_pad], zeroline=True)
-
     return fig
 
 
@@ -93,51 +84,15 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
 layout = html.Div(
     [
         html.H5("Page 1 – Sub A: Height vs Outreach"),
-
-        # Controls row 1
         dbc.Row(
             [
-                dbc.Col(
-                    dbc.Switch(
-                        id="toggle-pedestal",
-                        label="Add pedestal height",
-                        value=False,  # will sync from store at load
-                    ),
-                    md=3,
-                ),
-                dbc.Col(
-                    dbc.Input(
-                        id="pedestal-height",
-                        type="number",
-                        value=6.0,   # will sync from store
-                        step=0.1,
-                        min=0
-                    ),
-                    md=2,
-                ),
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="main-factor",
-                        options=MAIN_OPTIONS,
-                        value=1,
-                        clearable=False,
-                    ),
-                    md=3,
-                ),
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="folding-factor",
-                        options=FOLD_OPTIONS,
-                        value=1,
-                        clearable=False,
-                    ),
-                    md=3,
-                ),
+                dbc.Col(dbc.Switch(id="toggle-pedestal", label="Add pedestal height", value=False), md=3),
+                dbc.Col(dbc.Input(id="pedestal-height", type="number", value=6.0, step=0.1, min=0), md=2),
+                dbc.Col(dcc.Dropdown(id="main-factor", options=MAIN_OPTIONS, value=1, clearable=False), md=3),
+                dbc.Col(dcc.Dropdown(id="folding-factor", options=FOLD_OPTIONS, value=1, clearable=False), md=3),
             ],
             className="g-3 mb-2",
         ),
-
-        # Labels under the two subdivision dropdowns
         dbc.Row(
             [
                 dbc.Col(html.Div(""), md=3),
@@ -147,56 +102,30 @@ layout = html.Div(
             ],
             className="mb-3 small text-muted",
         ),
-
-        # Controls row 2 — interpolation mode
         dbc.Row(
             [
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="interp-mode",
-                        options=MODE_OPTIONS,
-                        value="linear",
-                        clearable=False,
-                    ),
-                    md=6,
-                ),
-                dbc.Col(
-                    html.Div("Interpolation mode", className="small text-muted"),
-                    md=3,
-                ),
+                dbc.Col(dcc.Dropdown(id="interp-mode", options=MODE_OPTIONS, value="linear", clearable=False), md=6),
+                dbc.Col(html.Div("Interpolation mode", className="small text-muted"), md=3),
             ],
             className="g-3 mb-2",
         ),
-
-        # Graph
         dcc.Graph(id="crane-graph"),
-
-        # Table + download
         html.Div(
             [
                 html.H6("Height / Outreach data"),
                 dash_table.DataTable(
                     id="crane-table",
-                    columns=[],  # set dynamically
-                    data=[],     # set dynamically
-                    sort_action="native",
-                    filter_action="native",
+                    columns=[], data=[],
+                    sort_action="native", filter_action="native",
                     page_size=20,
                     style_table={"height": "420px", "overflowY": "auto"},
                     style_cell={"padding": "6px", "fontSize": "14px"},
                     style_header={"fontWeight": "600"},
                 ),
-                dbc.Button(
-                    "Download CSV",
-                    id="download-csv-btn",
-                    n_clicks=0,
-                    color="primary",
-                    className="mt-3",
-                ),
+                dbc.Button("Download CSV", id="download-csv-btn", n_clicks=0, color="primary", className="mt-3"),
             ],
             className="mt-3",
         ),
-
         dcc.Download(id="download-csv"),
     ]
 )
@@ -205,8 +134,6 @@ layout = html.Div(
 # ----------------------------------------------------------------------
 # Callbacks
 # ----------------------------------------------------------------------
-
-# Sync controls from the global session store on first load
 @callback(
     Output("toggle-pedestal", "value"),
     Output("pedestal-height", "value"),
@@ -222,10 +149,11 @@ def sync_controls_from_store(config):
     main_f   = int(config.get("main_factor", 1))           if config else 1
     fold_f   = int(config.get("folding_factor", 1))        if config else 1
     mode     = (config.get("interp_mode") or "linear")     if config else "linear"
+    if mode not in {"linear", "spline"}:
+        mode = "linear"
     return include, pedestal, main_f, fold_f, mode
 
 
-# Write control changes back to the global session store
 @callback(
     Output("app-config", "data"),
     Input("toggle-pedestal", "value"),
@@ -238,7 +166,6 @@ def sync_controls_from_store(config):
 def write_store(include_pedestal, pedestal_height, main_factor, folding_factor, interp_mode, current):
     current = current or {}
 
-    # keep pedestal input sane
     try:
         ph = float(pedestal_height) if pedestal_height is not None else current.get("pedestal_height", 6.0)
         if not np.isfinite(ph):
@@ -246,17 +173,20 @@ def write_store(include_pedestal, pedestal_height, main_factor, folding_factor, 
     except Exception:
         ph = current.get("pedestal_height", 6.0)
 
+    mode = (interp_mode or "linear")
+    if mode not in {"linear", "spline"}:
+        mode = "linear"
+
     current.update({
         "include_pedestal": bool(include_pedestal),
         "pedestal_height": ph,
         "main_factor": int(main_factor) if main_factor else 1,
         "folding_factor": int(folding_factor) if folding_factor else 1,
-        "interp_mode": (interp_mode or "linear"),
+        "interp_mode": mode,
     })
     return current
 
 
-# Build the figure + table from the current effective dataset
 @callback(
     Output("crane-graph", "figure"),
     Output("crane-table", "columns"),
@@ -276,7 +206,6 @@ def update_outputs_from_store(config):
     return fig, columns, data
 
 
-# Download the currently effective dataset (interpolated + pedestal-configured)
 @callback(
     Output("download-csv", "data"),
     Input("download-csv-btn", "n_clicks"),
@@ -293,7 +222,7 @@ def download_csv(n_clicks, config):
     fname = (
         f"crane_points_m{config.get('main_factor',1)}"
         f"_f{config.get('folding_factor',1)}"
-        f"_{config.get('interp_mode','linear')}"
+        f"_{(config.get('interp_mode','linear') if config else 'linear')}"
         f"{'_with_pedestal' if include else '_without_pedestal'}.csv"
     )
     return dcc.send_data_frame(df_out.to_csv, filename=fname, index=False)
