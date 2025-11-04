@@ -3,33 +3,61 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator, RectBivariateSpline
 
+
 # ----------------------------------------------------------------------
-# Data reading utilities
+# Robust CSV → angle grid reader
 # ----------------------------------------------------------------------
+
+def _detect_sep(sample: str) -> str:
+    """
+    Heuristic: pick ';' if it appears more than ',', otherwise ','.
+    Works for EU 'CSV' exports where ';' is the delimiter and ',' may be decimals.
+    """
+    return ";" if sample.count(";") > sample.count(",") else ","
+
 
 def _read_angle_grid(filename: str, data_dir: str = "data"):
     """
-    Reads an angle-grid CSV (first row = main jib angles, first col = folding jib angles).
-    Returns: (main_angles: np.ndarray, fold_angles: np.ndarray, body: pd.DataFrame)
+    Reads an angle-grid CSV:
+      - first row (from col 2 onward) = main jib angles (deg)
+      - first col (from row 2 downward) = folding jib angles (deg)
+      - body = numeric values
+    Robust to either ';' or ',' as delimiter and to decimal commas.
+
+    Returns:
+      main_angles: np.ndarray[float]
+      fold_angles: np.ndarray[float]
+      body_df:     pd.DataFrame (index = fold_angles, columns = main_angles)
     """
     path = os.path.join(data_dir, filename)
-    # sep=None = automatic delimiter detection (comma/semicolon/tab)
-    df_raw = pd.read_csv(path, sep=None, engine="python")
+    with open(path, "r", encoding="utf-8") as f:
+        head = f.read(4096)
+    sep = _detect_sep(head)
 
-    # First row header cells (excluding first col header) are the main-jib angles
-    main_angles = df_raw.columns[1:]
-    main_angles = np.array([float(str(x).replace(",", ".")) for x in main_angles], dtype=float)
+    # Read with detected separator
+    df_raw = pd.read_csv(path, sep=sep, engine="python")
 
-    # First column (excluding header row) are the folding-jib angles
-    fold_angles = df_raw.iloc[1:, 0].astype(str)
-    fold_angles = np.array([float(x.replace(",", ".")) for x in fold_angles], dtype=float)
+    if df_raw.shape[0] < 2 or df_raw.shape[1] < 2:
+        raise ValueError(f"{filename}: not a 2D angle grid (shape={df_raw.shape}).")
 
-    # Convert the numeric grid body, coercing non-numeric to NaN
+    # Parse header (main angles) — convert decimal commas to dots
+    main_headers = [str(c).strip().replace(",", ".") for c in df_raw.columns[1:]]
+    try:
+        main_angles = np.array([float(x) for x in main_headers], dtype=float)
+    except Exception as e:
+        raise ValueError(f"{filename}: failed to parse main-jib angles from header.") from e
+
+    # Parse first column (fold angles) — rows 1:end
+    fold_col = df_raw.iloc[1:, 0].astype(str).str.strip().str.replace(",", ".", regex=False)
+    try:
+        fold_angles = np.array(fold_col.astype(float).to_list(), dtype=float)
+    except Exception as e:
+        raise ValueError(f"{filename}: failed to parse folding-jib angles from first column.") from e
+
+    # Convert body to numeric (coerce irregulars to NaN), then fill gently
     body_str = df_raw.iloc[1:, 1:].astype(str).replace({",": "."}, regex=True)
-    # column-wise numeric coercion (no deprecated applymap)
     body = body_str.apply(lambda s: pd.to_numeric(s, errors="coerce"))
 
-    # Ensure clean index/columns as floats
     body.index = fold_angles
     body.columns = main_angles
 
@@ -41,21 +69,21 @@ def _read_angle_grid(filename: str, data_dir: str = "data"):
 # ----------------------------------------------------------------------
 
 def _interp_fill(values: pd.DataFrame) -> pd.DataFrame:
-    """Interpolates missing values, filling NaNs with nearest neighbours."""
+    """
+    Light-touch infill for sporadic NaNs:
+      - interpolate horizontally & vertically
+      - ffill/bfill as final guard (no deprecated fillna(method=...))
+    """
     tmp = values.copy()
     tmp = tmp.interpolate(axis=1, limit_direction="both")
     tmp = tmp.interpolate(axis=0, limit_direction="both")
-    # use ffill/bfill (not deprecated fillna(method=...))
     tmp = tmp.ffill(axis=1).bfill(axis=1)
     tmp = tmp.ffill(axis=0).bfill(axis=0)
     return tmp
 
 
 def _interp_indices(n_old_rows: int, n_old_cols: int, n_new_rows: int, n_new_cols: int):
-    """
-    Build index arrays that map new grid indices to the old [0..N-1] index space
-    so we can interpolate irrespective of actual angle spacing.
-    """
+    """Index-space coordinates for interpolation (agnostic to actual angle spacing)."""
     fold_idx_old = np.arange(n_old_rows, dtype=float)
     main_idx_old = np.arange(n_old_cols, dtype=float)
     fold_idx_new = np.linspace(0, n_old_rows - 1, n_new_rows)
@@ -63,16 +91,32 @@ def _interp_indices(n_old_rows: int, n_old_cols: int, n_new_rows: int, n_new_col
     return fold_idx_old, main_idx_old, fold_idx_new, main_idx_new
 
 
+def _angles_equal(a: np.ndarray, b: np.ndarray) -> bool:
+    """Safe equality for float angle arrays."""
+    if len(a) != len(b):
+        return False
+    return np.allclose(np.asarray(a, float), np.asarray(b, float), rtol=0, atol=1e-12)
+
+
 def interpolate_value_grid(values: pd.DataFrame,
                            new_main: np.ndarray,
                            new_fold: np.ndarray,
                            mode: str = "linear") -> np.ndarray:
     """
-    Interpolates a 2D angle grid (values indexed by fold angles, columns = main angles)
-    to new main/fold angle arrays. We resample by index-space to avoid assuming linear
-    angle spacing in the source CSV.
+    Interpolate a 2D angle grid (values indexed by fold angles, columns = main angles)
+    to new angle arrays (new_main, new_fold).
+
+    IMPORTANT:
+    - If (new_main, new_fold) exactly match the original axes, returns the original
+      numeric array WITHOUT interpolating (bitwise-safe vs your 1×/1× expectation).
     """
-    vals = _interp_fill(values)
+    # Short-circuit: exact grid → return original values
+    orig_main = np.asarray(values.columns, dtype=float)
+    orig_fold = np.asarray(values.index, dtype=float)
+    if _angles_equal(orig_main, new_main) and _angles_equal(orig_fold, new_fold):
+        return values.to_numpy(dtype=float)
+
+    vals = _interp_fill(values)  # clean a bit before interpolating
     arr = vals.to_numpy(dtype=float)
 
     # Old grid index space
@@ -81,12 +125,13 @@ def interpolate_value_grid(values: pd.DataFrame,
         n_rows, n_cols, len(new_fold), len(new_main)
     )
 
-    if (mode or "linear").lower() == "spline":
-        # bicubic spline in index space
+    mode = (mode or "linear").lower()
+    if mode == "spline":
+        # bicubic spline in index space (smooth)
         spline = RectBivariateSpline(fold_idx_old, main_idx_old, arr, kx=3, ky=3)
         result = spline(fold_idx_new, main_idx_new)
     else:
-        # bilinear in index space
+        # bilinear in index space (stable)
         interp = RegularGridInterpolator(
             (fold_idx_old, main_idx_old), arr,
             method="linear", bounds_error=False, fill_value=None
@@ -95,9 +140,8 @@ def interpolate_value_grid(values: pd.DataFrame,
         pts = np.column_stack([F.ravel(), M.ravel()])
         result = interp(pts).reshape(len(new_fold), len(new_main))
 
-        # Optional: light fill for any remaining NaNs at the edges
+        # Edge clean-up with nearest if any NaNs remain
         if np.isnan(result).any():
-            # nearest neighbor pass
             interp_nn = RegularGridInterpolator(
                 (fold_idx_old, main_idx_old), arr,
                 method="nearest", bounds_error=False, fill_value=None
@@ -117,13 +161,17 @@ def load_crane_data(data_dir: str = "data",
                     height_file: str = "height.csv"):
     """
     Loads the crane outreach and height matrices from CSVs.
-    Returns: (main_angles, fold_angles, outreach_df, height_df)
+    Returns:
+      main_angles (deg), fold_angles (deg), outreach_df, height_df
     """
     main_angles, fold_angles, outreach_data = _read_angle_grid(outreach_file, data_dir)
     main2, fold2, height_data = _read_angle_grid(height_file, data_dir)
 
     if not np.allclose(main_angles, main2) or not np.allclose(fold_angles, fold2):
-        raise ValueError("Main/Folding angles mismatch between outreach.csv and height.csv.")
+        raise ValueError(
+            "Angle mismatch between outreach.csv and height.csv "
+            f"(main: {main_angles.shape} vs {main2.shape}; fold: {fold_angles.shape} vs {fold2.shape})"
+        )
 
     return main_angles, fold_angles, outreach_data, height_data
 
@@ -135,8 +183,7 @@ def load_crane_data(data_dir: str = "data",
 def _subdivide_angles(orig_angles: np.ndarray, factor: int) -> np.ndarray:
     """
     Return a new array subdividing each original interval into 'factor' parts,
-    preserving all original angle values.
-    factor=1 returns the original angles.
+    preserving all original angle values. factor=1 returns a copy of the original.
     """
     orig = np.asarray(orig_angles, dtype=float)
     if factor <= 1 or len(orig) < 2:
@@ -145,28 +192,30 @@ def _subdivide_angles(orig_angles: np.ndarray, factor: int) -> np.ndarray:
     pieces = []
     for i in range(len(orig) - 1):
         a, b = orig[i], orig[i + 1]
-        # include left endpoint, exclude right to avoid duplicates
+        # include left endpoint, exclude right to avoid duplicates across segments
         pieces.append(np.linspace(a, b, factor, endpoint=False))
     pieces.append(np.array([orig[-1]]))
     return np.concatenate(pieces)
 
 
-def get_position_grids(config: dict | None = None,
-                       data_dir: str = "data"):
+def get_position_grids(config: dict | None = None, data_dir: str = "data"):
     """
-    Creates the interpolated Outreach & Height matrices based on configuration,
-    and returns (outreach_grid, height_grid, new_main_angles, new_fold_angles).
+    Creates the (possibly interpolated) Outreach & Height matrices based on configuration,
+    and returns:
+      Xgrid (outreach), Ygrid (height), new_main_angles, new_fold_angles
 
-    - Respects interpolation mode (linear/spline)
-    - Respects main_factor and folding_factor (or fold_factor)
-    - Adds pedestal height to Height if include_pedestal is True
+    Config keys:
+      - interp_mode: "linear" | "spline"
+      - main_factor: int (1,2,4,8,16)
+      - folding_factor (or fold_factor): int (1,2,4,8,16,32)
+      - include_pedestal: bool
+      - pedestal_height: float (default 6.0 m)
     """
     config = config or {}
     mode = (config.get("interp_mode") or "linear").lower()
     include_pedestal = bool(config.get("include_pedestal", False))
     pedestal_height = float(config.get("pedestal_height", 6.0))
 
-    # accept both keys for backwards compatibility
     main_factor = int(config.get("main_factor", 1))
     folding_factor = int(config.get("folding_factor", config.get("fold_factor", 1)))
 
@@ -177,7 +226,7 @@ def get_position_grids(config: dict | None = None,
     new_main = _subdivide_angles(main_angles, main_factor)
     new_fold = _subdivide_angles(fold_angles, folding_factor)
 
-    # Interpolate to new grid
+    # Interpolate to new grid (OR pass-through when factors==1 thanks to short-circuit)
     outreach_grid = interpolate_value_grid(outreach_df, new_main, new_fold, mode)
     height_grid   = interpolate_value_grid(height_df,   new_main, new_fold, mode)
 
@@ -194,7 +243,7 @@ def get_position_grids(config: dict | None = None,
 def flatten_with_values(X: np.ndarray, Y: np.ndarray, values, value_name: str = "Value") -> pd.DataFrame:
     """
     Flattens 2D outreach/height/value matrices into a tidy DataFrame with XY and one value column.
-    values can be a 2D np.ndarray or a pd.DataFrame matching X/Y shape.
+    'values' can be a 2D np.ndarray or a pd.DataFrame matching X/Y shape.
     """
     if isinstance(values, pd.DataFrame):
         V = values.to_numpy(dtype=float)
@@ -228,12 +277,11 @@ def _flatten_with_angles(outreach_grid: np.ndarray,
 
 
 # ----------------------------------------------------------------------
-# Backward-compat API used by Page 1: get_crane_points
+# Backward-compatible API used by pages/subpages
 # ----------------------------------------------------------------------
 
 def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.DataFrame:
     """
-    Backwards-compatible function expected by subpages/page1_tab_a.py.
     Returns a DataFrame with columns:
       ['Outreach [m]', 'Height [m]', 'main_deg', 'folding_deg']
     honoring interpolation/pedestal settings in config.
@@ -243,10 +291,6 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
     return df
 
 
-# ----------------------------------------------------------------------
-# Harbour capacity data loader (angle-grid values)
-# ----------------------------------------------------------------------
-
 def load_value_grid(filename: str, data_dir: str = "data") -> pd.DataFrame:
     """
     Loads and cleans a capacity (or similar) grid file.
@@ -255,3 +299,20 @@ def load_value_grid(filename: str, data_dir: str = "data") -> pd.DataFrame:
     _, _, df = _read_angle_grid(filename, data_dir)
     df = _interp_fill(df)
     return df
+
+
+# ----------------------------------------------------------------------
+# (Optional) quick validator you can call during debugging
+# ----------------------------------------------------------------------
+
+def validate_grid(df: pd.DataFrame, name="grid"):
+    """
+    Prints basic diagnostics for a numeric grid DataFrame.
+    """
+    if df.empty:
+        print(f"[WARN] {name}: empty DataFrame")
+        return
+    n_nan = int(df.isna().sum().sum())
+    print(f"[OK] {name}: {df.shape[0]}×{df.shape[1]} grid, NaNs={n_nan}")
+    if not np.isfinite(df.to_numpy(dtype=float)).all():
+        print(f"[WARN] {name}: non-finite values exist.")
