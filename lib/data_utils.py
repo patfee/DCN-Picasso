@@ -90,7 +90,7 @@ def _interp_fill(values: pd.DataFrame) -> pd.DataFrame:
 def _interp_grid_linear(values: pd.DataFrame, new_main: np.ndarray, new_folding: np.ndarray) -> pd.DataFrame:
     tmp = _interp_fill(values)
     orig_folding = tmp.index.to_numpy(dtype=float)
-    orig_main = tmp.columns.to_numpy(dtype=float)
+    orig_main    = tmp.columns.to_numpy(dtype=float)
     mat = tmp.to_numpy(dtype=float)
 
     r = np.empty((mat.shape[0], len(new_main)), float)
@@ -110,7 +110,7 @@ def _interp_grid_spline(values: pd.DataFrame, new_main: np.ndarray, new_folding:
     tmp = _interp_fill(tmp)
 
     orig_folding = tmp.index.to_numpy(dtype=float)
-    orig_main = tmp.columns.to_numpy(dtype=float)
+    orig_main    = tmp.columns.to_numpy(dtype=float)
     mat = tmp.to_numpy(dtype=float)
 
     r = np.empty((mat.shape[0], len(new_main)), float)
@@ -124,95 +124,49 @@ def _interp_grid_spline(values: pd.DataFrame, new_main: np.ndarray, new_folding:
 
 
 # ----------------------------------------------------------------------
-# Kinematic (2-link) model — folding joint at end of main
+# Kinematic (2-link) model — per your confirmed convention
+#   θ = main angle from horizontal (0°..~84°, CCW positive)
+#   φ = folding angle relative to main (0° folded flat colinear, CCW positive to ~102°)
+#   x = L1*cosθ + L2*cos(θ - φ) + x0
+#   y = L1*sinθ + L2*sin(θ - φ) + y0
 # ----------------------------------------------------------------------
-def _solve_2link_params_auto(
-    df_points: pd.DataFrame,
-    beta_range_deg=(0.0, 360.0),     # base phase β scan
-    beta_step_deg=2.0,
-    sign_candidates=(+1, -1),
-    dtheta_deg_range=(-5.0, 5.0),
-    dphi_deg_range=(-5.0, 5.0),
-    dstep_deg=1.0,
-):
-    """
-    Auto-fit L1, L2, x0, y0 and zero-offsets dtheta,dphi, sign s, and base phase β.
-    df_points must have: main_deg, folding_deg, Outreach [m], Height [m]  (NO pedestal added)
-    """
-    th0 = df_points["main_deg"].to_numpy()
-    ph0 = df_points["folding_deg"].to_numpy()
-    x   = df_points["Outreach [m]"].to_numpy()
-    y   = df_points["Height [m]"].to_numpy()
+def _solve_2link_from_points(df_points: pd.DataFrame):
+    """Solve L1, L2, x0, y0 by linear least squares from original CSV points (no pedestal)."""
+    th = np.deg2rad(df_points["main_deg"].to_numpy())
+    ph = np.deg2rad(df_points["folding_deg"].to_numpy())
+    x  = df_points["Outreach [m]"].to_numpy()
+    y  = df_points["Height [m]"].to_numpy()
 
-    best = None
+    # Basis vectors
+    c1 = np.cos(th)
+    s1 = np.sin(th)
+    c2 = np.cos(th - ph)
+    s2 = np.sin(th - ph)
 
-    betas = np.arange(beta_range_deg[0], beta_range_deg[1] + 1e-9, beta_step_deg)
-    dth_vals = np.arange(dtheta_deg_range[0], dtheta_deg_range[1] + 1e-9, dstep_deg)
-    dph_vals = np.arange(dphi_deg_range[0], dphi_deg_range[1] + 1e-9, dstep_deg)
+    # Build linear system A @ [L1, L2, x0, y0] = b
+    Ax = np.column_stack([c1,  c2,  np.ones_like(x), np.zeros_like(x)])
+    Ay = np.column_stack([s1,  s2,  np.zeros_like(y), np.ones_like(y)])
+    A  = np.vstack([Ax, Ay])
+    b  = np.concatenate([x, y])
 
-    for beta_deg in betas:
-        base = np.deg2rad(beta_deg)
-        for s in sign_candidates:
-            for dth in dth_vals:
-                for dph in dph_vals:
-                    th = np.deg2rad(th0 + dth)
-                    ph = np.deg2rad(ph0 + dph)
-
-                    # Folding global angle = θ + β + s*φ
-                    cth, sth = np.cos(th), np.sin(th)
-                    ctp, stp = np.cos(th + base + s * ph), np.sin(th + base + s * ph)
-
-                    # Linear solve for [L1, L2, x0, y0]
-                    Ax = np.column_stack([cth,  ctp,  np.ones_like(x), np.zeros_like(x)])
-                    Ay = np.column_stack([sth,  stp,  np.zeros_like(y), np.ones_like(y)])
-                    A  = np.vstack([Ax, Ay])
-                    b  = np.concatenate([x, y])
-
-                    params, *_ = np.linalg.lstsq(A, b, rcond=None)
-                    L1, L2, x0, y0 = params
-
-                    x_fit = L1 * cth + L2 * ctp + x0
-                    y_fit = L1 * sth + L2 * stp + y0
-                    rms = np.sqrt(np.mean((x_fit - x) ** 2 + (y_fit - y) ** 2))
-
-                    if (best is None) or (rms < best[0]):
-                        best = (rms, dict(
-                            L1=float(L1), L2=float(L2),
-                            x0=float(x0), y0=float(y0),
-                            s=int(s), dtheta=float(dth), dphi=float(dph),
-                            base_phase=float(beta_deg)
-                        ))
-    return best  # (rms, params dict)
+    params, *_ = np.linalg.lstsq(A, b, rcond=None)
+    L1, L2, x0, y0 = params
+    return float(L1), float(L2), float(x0), float(y0)
 
 
-def _forward_2link_evaluate(main_deg: np.ndarray, fold_deg: np.ndarray, params: dict):
-    """
-    Evaluate the 2-link model for given main and folding angles (degrees).
-    Returns (Xgrid_df, Ygrid_df)
-    """
-    L1 = params["L1"]; L2 = params["L2"]
-    x0 = params["x0"]; y0 = params["y0"]
-    s = params["s"]; dth = params["dtheta"]; dph = params["dphi"]
-    base = np.deg2rad(params.get("base_phase", 0.0))
-
-    TH, PH = np.meshgrid(main_deg, fold_deg)
-    th = np.deg2rad(TH + dth)
-    ph = np.deg2rad(PH + dph)
-
-    # Folding link global angle = θ + β + s*φ
-    x = L1 * np.cos(th) + L2 * np.cos(th + base + s * ph) + x0
-    y = L1 * np.sin(th) + L2 * np.sin(th + base + s * ph) + y0
-
+def _evaluate_2link(main_deg: np.ndarray, fold_deg: np.ndarray, L1: float, L2: float, x0: float, y0: float):
+    """Evaluate the 2-link model on a main×folding angle grid (degrees). Returns (Xgrid, Ygrid) DataFrames."""
+    TH, PH = np.meshgrid(main_deg, fold_deg)        # columns=main, rows=folding
+    th = np.deg2rad(TH)
+    ph = np.deg2rad(PH)
+    x = L1 * np.cos(th) + L2 * np.cos(th - ph) + x0
+    y = L1 * np.sin(th) + L2 * np.sin(th - ph) + y0
     return pd.DataFrame(x, index=fold_deg, columns=main_deg), pd.DataFrame(y, index=fold_deg, columns=main_deg)
 
 
 def _anchor_with_original(Xgrid: pd.DataFrame, Ygrid: pd.DataFrame,
                           Xorig: pd.DataFrame, Yorig: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Overwrite the dense kinematic grids at all ORIGINAL angle pairs with the exact CSV values.
-    This guarantees perfect equality at original points, independent of model residuals.
-    """
-    # Ensure indices/columns are numeric for exact-matching
+    """Overwrite dense grids at original angle pairs with exact CSV values (guarantees identical originals)."""
     Xgrid = Xgrid.copy(); Ygrid = Ygrid.copy()
     Xgrid.index = Xgrid.index.astype(float); Xgrid.columns = Xgrid.columns.astype(float)
     Ygrid.index = Ygrid.index.astype(float); Ygrid.columns = Ygrid.columns.astype(float)
@@ -243,33 +197,30 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
     new_main = _subdivide_angles(orig_main, main_factor)
     new_fold = _subdivide_angles(orig_fold, folding_factor)
 
-    # --- Kinematic mode (2-link circular) with hard anchoring ------------
+    # --- Kinematic mode (exact 2-link geometry) with hard anchoring ------
     if mode == "kinematic":
         # Fit on ORIGINAL grids (no pedestal)
         df_orig = _flatten(outreach_grid, height_grid)
-        rms, params = _solve_2link_params_auto(
-            df_orig,
-            beta_range_deg=(0.0, 360.0),
-            beta_step_deg=2.0,
-            sign_candidates=(+1, -1),
-            dtheta_deg_range=(-5.0, 5.0),
-            dphi_deg_range=(-5.0, 5.0),
-            dstep_deg=1.0,
-        )
+        L1, L2, x0, y0 = _solve_2link_from_points(df_orig)
 
-        # Evaluate model on dense grid
-        Xgrid, Ygrid = _forward_2link_evaluate(new_main, new_fold, params)
+        # Evaluate on dense grid
+        Xgrid, Ygrid = _evaluate_2link(new_main, new_fold, L1, L2, x0, y0)
 
-        # Anchor: force exact equality at all original angle pairs
+        # Anchor exact original values back in
         Xgrid, Ygrid = _anchor_with_original(Xgrid, Ygrid, outreach_grid, height_grid)
 
-        # Pedestal handling AFTER anchoring (keeps y0 meaningful)
+        # Apply pedestal AFTER anchoring
         if include:
             Ygrid = Ygrid + pedestal
 
         df = _flatten(Xgrid, Ygrid)
+        # Optional diagnostics (you can read attrs in a page to show fit errors if desired)
+        # Compute RMS vs originals for sanity:
+        x_fit_o, y_fit_o = _evaluate_2link(orig_main, orig_fold, L1, L2, x0, y0)
+        rms = float(np.sqrt(np.nanmean((x_fit_o - outreach_grid).to_numpy()**2 +
+                                       (y_fit_o - height_grid).to_numpy()**2)))
         df.attrs["fit_rms"] = rms
-        df.attrs["fit_params"] = params
+        df.attrs["fit_params"] = {"L1": L1, "L2": L2, "x0": x0, "y0": y0}
         return df
 
     # --- Spline / Linear modes ------------------------------------------
