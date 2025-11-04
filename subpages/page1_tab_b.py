@@ -1,5 +1,2 @@
-from dash import html, dcc
-layout = html.Div(className="tab-wrap", children=[
-    html.H4("Page 2 – Overview"),
-    dcc.Markdown("- Put graphs here\n- KPIs\n- Separate from other tabs")
-])
+from dash import html
+layout = html.Div([html.H5("Page 1 – Sub B (to be developed)")])
