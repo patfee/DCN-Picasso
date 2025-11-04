@@ -128,7 +128,7 @@ def _interp_grid_spline(values: pd.DataFrame, new_main: np.ndarray, new_folding:
 # ----------------------------------------------------------------------
 def _solve_2link_params_auto(
     df_points: pd.DataFrame,
-    beta_range_deg=(0.0, 360.0),     # <- base phase β scan (degrees)
+    beta_range_deg=(0.0, 360.0),     # base phase β scan
     beta_step_deg=2.0,
     sign_candidates=(+1, -1),
     dtheta_deg_range=(-5.0, 5.0),
@@ -158,12 +158,11 @@ def _solve_2link_params_auto(
                     th = np.deg2rad(th0 + dth)
                     ph = np.deg2rad(ph0 + dph)
 
-                    # Main global angle = th
-                    # Folding global angle = th + base + s*ph
+                    # Folding global angle = θ + β + s*φ
                     cth, sth = np.cos(th), np.sin(th)
                     ctp, stp = np.cos(th + base + s * ph), np.sin(th + base + s * ph)
 
-                    # Linear system for [L1, L2, x0, y0]
+                    # Linear solve for [L1, L2, x0, y0]
                     Ax = np.column_stack([cth,  ctp,  np.ones_like(x), np.zeros_like(x)])
                     Ay = np.column_stack([sth,  stp,  np.zeros_like(y), np.ones_like(y)])
                     A  = np.vstack([Ax, Ay])
@@ -183,7 +182,7 @@ def _solve_2link_params_auto(
                             s=int(s), dtheta=float(dth), dphi=float(dph),
                             base_phase=float(beta_deg)
                         ))
-    return best  # (rms, params)
+    return best  # (rms, params dict)
 
 
 def _forward_2link_evaluate(main_deg: np.ndarray, fold_deg: np.ndarray, params: dict):
@@ -207,6 +206,26 @@ def _forward_2link_evaluate(main_deg: np.ndarray, fold_deg: np.ndarray, params: 
     return pd.DataFrame(x, index=fold_deg, columns=main_deg), pd.DataFrame(y, index=fold_deg, columns=main_deg)
 
 
+def _anchor_with_original(Xgrid: pd.DataFrame, Ygrid: pd.DataFrame,
+                          Xorig: pd.DataFrame, Yorig: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Overwrite the dense kinematic grids at all ORIGINAL angle pairs with the exact CSV values.
+    This guarantees perfect equality at original points, independent of model residuals.
+    """
+    # Ensure indices/columns are numeric for exact-matching
+    Xgrid = Xgrid.copy(); Ygrid = Ygrid.copy()
+    Xgrid.index = Xgrid.index.astype(float); Xgrid.columns = Xgrid.columns.astype(float)
+    Ygrid.index = Ygrid.index.astype(float); Ygrid.columns = Ygrid.columns.astype(float)
+
+    for f in Xorig.index.astype(float):
+        if f in Xgrid.index:
+            for m in Xorig.columns.astype(float):
+                if m in Xgrid.columns:
+                    Xgrid.at[f, m] = Xorig.at[f, m]
+                    Ygrid.at[f, m] = Yorig.at[f, m]
+    return Xgrid, Ygrid
+
+
 # ----------------------------------------------------------------------
 # Main entry: get_crane_points
 # ----------------------------------------------------------------------
@@ -224,14 +243,13 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
     new_main = _subdivide_angles(orig_main, main_factor)
     new_fold = _subdivide_angles(orig_fold, folding_factor)
 
-    # --- Kinematic mode (2-link circular) --------------------------------
+    # --- Kinematic mode (2-link circular) with hard anchoring ------------
     if mode == "kinematic":
-        # Fit on ORIGINAL grids (no pedestal in the fit)
+        # Fit on ORIGINAL grids (no pedestal)
         df_orig = _flatten(outreach_grid, height_grid)
-
         rms, params = _solve_2link_params_auto(
             df_orig,
-            beta_range_deg=(0.0, 360.0),   # <-- wide search for β; adjust step if needed
+            beta_range_deg=(0.0, 360.0),
             beta_step_deg=2.0,
             sign_candidates=(+1, -1),
             dtheta_deg_range=(-5.0, 5.0),
@@ -239,13 +257,17 @@ def get_crane_points(config: dict | None = None, data_dir: str = "data") -> pd.D
             dstep_deg=1.0,
         )
 
+        # Evaluate model on dense grid
         Xgrid, Ygrid = _forward_2link_evaluate(new_main, new_fold, params)
 
+        # Anchor: force exact equality at all original angle pairs
+        Xgrid, Ygrid = _anchor_with_original(Xgrid, Ygrid, outreach_grid, height_grid)
+
+        # Pedestal handling AFTER anchoring (keeps y0 meaningful)
         if include:
             Ygrid = Ygrid + pedestal
 
         df = _flatten(Xgrid, Ygrid)
-        # Keep fit diagnostics available to the page if you want to display them
         df.attrs["fit_rms"] = rms
         df.attrs["fit_params"] = params
         return df
