@@ -1,26 +1,59 @@
-from dash import html, dcc, callback, Input, Output
-from subpages import page2_tab_a, page2_tab_b, page2_tab_c  # add page2_tab_c
+from dash import html, dcc
+import dash_bootstrap_components as dbc
+
+# Import sub-tabs
+from subpages import page2_tab_a, page2_tab_b, page2_tab_c
+
+
+# ----------------------------- Layout --------------------------------
 
 layout = html.Div(
     [
-        html.H3("Page 2"),
-cc.Tabs(
-    id="page2-tabs",
-    value="tab-a",
-    children=[
-        dcc.Tab(label="Tab A – Colored points", value="tab-a", children=page2_tab_a.layout),
-        dcc.Tab(label="Tab B – Iso hulls", value="tab-b", children=page2_tab_b.layout),
-        dcc.Tab(label="Tab C – Iso hulls (copy)", value="tab-c", children=page2_tab_c.layout),  # new
-    ],
+        html.H4("Page 2 – Harbour Lift Visualization", className="mb-3"),
+
+        html.Div(
+            "This page visualizes crane capacity data aligned with Page 1 interpolation settings "
+            "(main/folding jib subdivisions, pedestal height, interpolation mode).",
+            className="text-muted mb-4",
         ),
-        html.Div(id="page2-tab-content"),
+
+        # Tab control
+        dcc.Tabs(
+            id="page2-tabs",
+            value="tab-a",
+            children=[
+                dcc.Tab(
+                    label="Tab A – Harbour Cdyn 1.15 (Colored Points)",
+                    value="tab-a",
+                    children=page2_tab_a.layout,
+                    className="p-2",
+                ),
+                dcc.Tab(
+                    label="Tab B – Harbour Cdyn 1.15 (Iso Hulls)",
+                    value="tab-b",
+                    children=page2_tab_b.layout,
+                    className="p-2",
+                ),
+                dcc.Tab(
+                    label="Tab C – Harbour Cdyn 1.15 (Iso Hulls Copy)",
+                    value="tab-c",
+                    children=page2_tab_c.layout,
+                    className="p-2",
+                ),
+            ],
+        ),
+
+        html.Hr(className="mt-4 mb-3"),
+
+        dbc.Alert(
+            [
+                html.Strong("Tip: "),
+                "switch between tabs to compare coloured scatter data (Tab A) "
+                "and filled iso-capacity hulls (Tab B / C).",
+            ],
+            color="info",
+            className="mt-2",
+        ),
     ]
 )
 
-@callback(Output("page2-tab-content", "children"), Input("tabs-page2", "value"))
-def _switch_tab(tab_value):
-    if tab_value == "page2-tab-a":
-        return page2_tab_a.layout
-    if tab_value == "page2-tab-b":
-        return page2_tab_b.layout
-    return html.Div("Coming soon…")
