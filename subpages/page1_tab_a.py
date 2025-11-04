@@ -4,6 +4,7 @@ import plotly.graph_objs as go
 import numpy as np
 from lib.data_utils import get_crane_points
 
+
 def make_figure(df, include_pedestal: bool):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -32,6 +33,7 @@ def make_figure(df, include_pedestal: bool):
         fig.update_yaxes(range=[y_min - y_pad, y_max + y_pad], zeroline=True)
 
     return fig
+
 
 layout = html.Div(
     [
@@ -64,6 +66,7 @@ layout = html.Div(
         dcc.Graph(id="crane-graph"),
     ]
 )
+
 
 # --- Sync the UI controls with the session store on first load
 @callback(
