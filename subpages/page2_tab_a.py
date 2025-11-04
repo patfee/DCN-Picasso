@@ -5,18 +5,22 @@ import numpy as np
 import pandas as pd
 
 from lib.data_utils import (
-    get_position_grids,
-    load_value_grid,
-    interpolate_value_grid,
-    flatten_with_values,
+    get_position_grids,       # X/Y grids + angle arrays (aligned with Page 1)
+    load_value_grid,          # loads Harbour_Cdyn115.csv (angle grid)
+    interpolate_value_grid,   # -> ndarray on current angle grid
+    flatten_with_values,      # X/Y + values -> tidy df (no angles)
 )
 
-VALUE_FILE = "Harbour_Cdyn115.csv"     # in /data
-VALUE_LABEL = "Capacity [t]"           # colorbar / column title
+VALUE_FILE  = "Harbour_Cdyn115.csv"
+VALUE_LABEL = "Capacity [t]"
 
 
 def _make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
-    custom = np.stack([df["main_deg"].to_numpy(), df["folding_deg"].to_numpy()], axis=-1)
+    # customdata holds angles for the hover
+    custom = np.stack(
+        [df["main_deg"].to_numpy(), df["folding_deg"].to_numpy()],
+        axis=-1,
+    )
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -81,7 +85,7 @@ layout = html.Div(
     [
         html.H5("Page 2 – Sub A: Harbour lift capacity (Cdyn 1.15)"),
         html.Div(className="mb-2 small text-muted",
-                 children="Aligned to the current interpolation mode and angle subdivisions from Page 1."),
+                 children="Aligned with Page 1 settings (linear/spline, subdivisions, pedestal)."),
 
         dcc.Graph(id="harbour-cdyn115-graph"),
 
@@ -119,17 +123,20 @@ def update_harbour_view(config):
     if mode not in {"linear", "spline"}:
         mode = "linear"
 
-    # 1) Build XY grids to match Page 1’s selection
+    # 1) Build XY grids that match Page 1
     Xgrid, Ygrid, new_main, new_fold = get_position_grids(config=config, data_dir="data")
 
-    # 2) Load Harbour Cdyn 1.15 values on original angle grid; interpolate to current grid
-    V_orig = load_value_grid(VALUE_FILE, data_dir="data")
-    Vgrid = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
+    # 2) Interpolate value grid to the same angles
+    V_orig = load_value_grid(VALUE_FILE, data_dir="data")     # DataFrame on original angles
+    Vgrid  = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)  # ndarray on new grid
 
-    # 3) Flatten for plotting/table
+    # 3) Make tidy df (X/Y/value) and add angles for hover/table
     df = flatten_with_values(Xgrid, Ygrid, Vgrid, value_name=VALUE_LABEL)
+    F, M = np.meshgrid(new_fold, new_main, indexing="ij")
+    df["main_deg"]    = M.ravel()
+    df["folding_deg"] = F.ravel()
 
-    # 4) Build figure + table
+    # 4) Plot and table
     fig = _make_figure(df, include_pedestal=include)
     df_view = _format_df_for_table(df, include)
     columns = [{"name": c, "id": c} for c in df_view.columns]
@@ -154,10 +161,15 @@ def download_harbour_csv(n_clicks, config):
 
     Xgrid, Ygrid, new_main, new_fold = get_position_grids(config=config, data_dir="data")
     V_orig = load_value_grid(VALUE_FILE, data_dir="data")
-    Vgrid = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
+    Vgrid  = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
+
     df = flatten_with_values(Xgrid, Ygrid, Vgrid, value_name=VALUE_LABEL)
+    F, M = np.meshgrid(new_fold, new_main, indexing="ij")
+    df["main_deg"]    = M.ravel()
+    df["folding_deg"] = F.ravel()
 
     df_view = _format_df_for_table(df, include)
-    fname = f"Harbour_Cdyn115_m{config.get('main_factor',1)}_f{config.get('folding_factor',1)}_{mode}" \
+    fname = f"Harbour_Cdyn115_m{config.get('main_factor',1)}_f{config.get('folding_factor',config.get('fold_factor',1))}_{mode}" \
             f"{'_with_pedestal' if include else '_without_pedestal'}.csv"
     return dcc.send_data_frame(df_view.to_csv, filename=fname, index=False)
+
