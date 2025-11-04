@@ -1,52 +1,57 @@
-import dash
-from dash import html, dcc
+from dash import Dash, html, dcc
 import dash_bootstrap_components as dbc
-import os
+from flask import Flask
 
-# --- App ---
-app = dash.Dash(
-    __name__,
-    use_pages=True,
-    suppress_callback_exceptions=True,
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
-    assets_folder="assets",
-    title="My Application"
-)
-server = app.server  # for gunicorn / Coolify
+# Local imports
+from pages import page1, page2, page3
 
-# --- Header ---
-header = html.Header(
-    className="app-header",
-    children=[
-        html.Div("My Application 2", className="app-title"),
-        html.Img(src="/assets/logo.png", className="app-logo", alt="Logo")
-    ],
-)
+# Create Flask + Dash
+server = Flask(__name__)
+app = Dash(__name__, server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# --- Sidebar ---
-sidebar = html.Nav(
-    className="app-sidebar",
-    children=[
-        html.Div("Menu", className="sidebar-title"),
-        html.Ul(
-            className="sidebar-list",
-            children=[
-                html.Li(dcc.Link("Page 1", href="/page-1", className="sidebar-link")),
-                html.Li(dcc.Link("Page 2", href="/page-2", className="sidebar-link")),
-                html.Li(dcc.Link("Page 3", href="/page-3", className="sidebar-link")),
+# Sidebar
+sidebar = html.Div(
+    [
+        html.H2("Menu"),
+        html.Hr(),
+        dbc.Nav(
+            [
+                dbc.NavLink("Page 1", href="/page1", active="exact"),
+                dbc.NavLink("Page 2", href="/page2", active="exact"),
+                dbc.NavLink("Page 3", href="/page3", active="exact"),
             ],
+            vertical=True,
+            pills=True,
         ),
-        html.Div(className="sidebar-footer", children="© Your Company")
+        html.Div("© Your Company", className="mt-auto small text-muted text-center")
     ],
+    className="bg-light sidebar p-3",
 )
 
-# --- Content ---
-content = html.Main(className="app-content", children=[dash.page_container])
+# Layout
+app.layout = dbc.Container(
+    [
+        dbc.Row([
+            dbc.Col(sidebar, width=2),
+            dbc.Col(dcc.Location(id="url"), width=10),
+        ]),
+        dbc.Row(dbc.Col(html.Div(id="page-content"), width=10))
+    ],
+    fluid=True
+)
 
-# --- Layout ---
-app.layout = html.Div(className="app-root", children=[header, sidebar, content])
+# Callbacks for routing
+from dash import Input, Output
+@app.callback(Output("page-content", "children"), Input("url", "pathname"))
+def render_page_content(pathname):
+    if pathname == "/page1":
+        return page1.layout
+    elif pathname == "/page2":
+        return page2.layout
+    elif pathname == "/page3":
+        return page3.layout
+    else:
+        return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
 
 if __name__ == "__main__":
-    # Bind to all interfaces; default port 3000 so the app is reachable at 192.168.1.203:3000
-    port = int(os.environ.get("PORT", 3000))
-    app.run_server(host="0.0.0.0", port=port, debug=True)
+    app.run_server(host="0.0.0.0", port=8050, debug=True)
