@@ -1,16 +1,17 @@
 from dash import html, dcc, callback, Input, Output
-from subpages import page2_tab_a, page2_tab_b
+from subpages import page2_tab_a, page2_tab_b, page2_tab_c  # add page2_tab_c
 
 layout = html.Div(
     [
         html.H3("Page 2"),
-        dcc.Tabs(
-            id="tabs-page2",
-            value="page2-tab-a",
-            children=[
-                dcc.Tab(label="Sub A", value="page2-tab-a"),  # coloured point cloud
-                dcc.Tab(label="Sub B", value="page2-tab-b"),  # iso-capacity hulls
-            ],
+cc.Tabs(
+    id="page2-tabs",
+    value="tab-a",
+    children=[
+        dcc.Tab(label="Tab A – Colored points", value="tab-a", children=page2_tab_a.layout),
+        dcc.Tab(label="Tab B – Iso hulls", value="tab-b", children=page2_tab_b.layout),
+        dcc.Tab(label="Tab C – Iso hulls (copy)", value="tab-c", children=page2_tab_c.layout),  # new
+    ],
         ),
         html.Div(id="page2-tab-content"),
     ]
