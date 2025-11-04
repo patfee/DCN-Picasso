@@ -2,6 +2,7 @@ from dash import html, dcc
 import plotly.graph_objs as go
 from lib.data_utils import load_crane_data
 
+# Load once (small CSVs); if you want hot-reload, move this into a callback later
 df = load_crane_data()
 
 fig = go.Figure()
@@ -19,10 +20,12 @@ fig.update_layout(
     xaxis_title="Outreach [m]",
     yaxis_title="Jib head above pedestal flange [m]",
     template="plotly_white",
-    height=650
+    height=650,
 )
 
-layout = html.Div([
-    html.H5("Page 1 – Sub A: Height vs Outreach"),
-    dcc.Graph(figure=fig)
-])
+layout = html.Div(
+    [
+        html.H5("Page 1 – Sub A: Height vs Outreach"),
+        dcc.Graph(figure=fig),
+    ]
+)
