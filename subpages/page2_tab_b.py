@@ -15,22 +15,20 @@ from lib.data_utils import (
 VALUE_FILE  = "Harbour_Cdyn115.csv"
 VALUE_LABEL = "Capacity [t]"
 
-# Levels (t) – tweak if you want other banding
-ISO_LEVELS = [0, 35, 70, 105, 140]  # edges for filled bands (uniform spacing)
+# Band edges (t) – matches your manual bands: 0–35–70–105–140
+ISO_LEVELS = [0, 35, 70, 105, 140]
 
-# Colors roughly inspired by your screenshot
+# Colors roughly inspired by your image
 COLORSCALE = [
-    [0.00, "#003b46"],  # deep teal (low)
+    [0.00, "#003b46"],  # deep teal
     [0.20, "#00b3c6"],  # cyan
     [0.40, "#9ecf2a"],  # green-yellow
     [0.60, "#ffcc33"],  # yellow
     [0.80, "#ff8840"],  # orange
-    [1.00, "#cc2f2f"],  # red (high)
+    [1.00, "#cc2f2f"],  # red
 ]
 
-# Discrete legend swatches for the bands between ISO_LEVELS
-BAND_COLORS = ["#00b3c6", "#9ecf2a", "#ffcc33", "#ff8840"]
-
+BAND_COLORS = ["#00b3c6", "#9ecf2a", "#ffcc33", "#ff8840"]  # for the legend swatches
 
 def _legend_card() -> dbc.Card:
     rows = []
@@ -64,9 +62,9 @@ def _legend_card() -> dbc.Card:
         style={"maxWidth": "260px"}
     )
 
-
 def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples: bool) -> go.Figure:
-    """Rasterize scattered points to a regular XY grid and draw filled iso-bands."""
+    """Rasterize scattered points to a regular XY grid and draw filled iso-bands.
+       IMPORTANT: We DO NOT extrapolate outside the data hull; NaNs stay NaN."""
     if df.empty:
         return go.Figure()
 
@@ -74,35 +72,20 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
     y = df["Height [m]"].to_numpy()
     z = df[VALUE_LABEL].to_numpy()
 
-    # Guard: need at least 3 points for triangulation
-    if len(x) < 3:
-        fig = go.Figure()
-        fig.update_layout(
-            title="Harbour lift — Cdyn = 1.15 (iso-capacity hulls)",
-            xaxis_title="Outreach [m]",
-            yaxis_title=("Jib head above deck level [m]" if include_pedestal
-                         else "Jib head above pedestal flange [m]"),
-            template="plotly_white",
-            height=760, margin=dict(l=40, r=20, t=60, b=40),
-        )
-        return fig
-
-    # Define rectilinear canvas
+    # Canvas (rectilinear)
     x_pad = 0.03 * (x.max() - x.min() + 1e-9)
     y_pad = 0.03 * (y.max() - y.min() + 1e-9)
-    xi = np.linspace(x.min() - x_pad, x.max() + x_pad, 300)
-    yi = np.linspace(y.min() - y_pad, y.max() + y_pad, 300)
+    xi = np.linspace(x.min() - x_pad, x.max() + x_pad, 320)
+    yi = np.linspace(y.min() - y_pad, y.max() + y_pad, 320)
     XI, YI = np.meshgrid(xi, yi)
 
-    # Interpolate scattered to grid; linear gives NaN outside convex hull (good mask)
-    Z_lin = griddata(points=np.column_stack([x, y]), values=z, xi=(XI, YI), method="linear")
-    # Fill small holes with nearest (keeps the hull edges crisp)
-    Z_near = griddata(points=np.column_stack([x, y]), values=z, xi=(XI, YI), method="nearest")
-    Z = np.where(np.isnan(Z_lin), Z_near, Z_lin)
+    # Linear interpolation only; leaves NaN OUTSIDE the convex hull
+    Z = griddata(points=np.column_stack([x, y]), values=z, xi=(XI, YI), method="linear")
 
-    # Build filled contours (uniform band size due to uniform ISO_LEVELS spacing)
-    band_step = ISO_LEVELS[1] - ISO_LEVELS[0] if len(ISO_LEVELS) > 1 else 10
+    # Build filled contours using only valid cells; Plotly ignores NaNs (no color outside)
+    band_step = ISO_LEVELS[1] - ISO_LEVELS[0] if len(ISO_LEVELS) > 1 else 35
     fig = go.Figure()
+
     fig.add_trace(go.Contour(
         x=xi, y=yi, z=Z,
         contours=dict(
@@ -113,21 +96,40 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
             size=band_step,
         ),
         colorscale=COLORSCALE,
-        colorbar=dict(title=VALUE_LABEL),
-        line=dict(width=1),
+        colorbar=dict(title=VALUE_LABEL, tickvals=ISO_LEVELS),
+        line=dict(width=1, color="rgba(0,0,0,0.7)"),
         hovertemplate=("Outreach: %{x:.2f} m<br>"
                        "Height: %{y:.2f} m<br>"
-                       f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"),  # NOTE: double braces around z
+                       f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"),
         showscale=True,
-        name="Iso-bands",
+        # No zsmooth; we want band edges crisp
+        zsmooth=False,
     ))
 
+    # Optional overlay of sample points
     if show_samples:
         fig.add_trace(go.Scattergl(
             x=x, y=y, mode="markers",
-            marker=dict(size=3, opacity=0.3),
+            marker=dict(size=3, opacity=0.28),
             name="Samples",
             hoverinfo="skip",
+        ))
+
+    # Optional: emphasize a couple of key iso-lines (e.g. 70 & 105 t) like the manual’s yellow outline
+    for level in (70, 105):
+        fig.add_trace(go.Contour(
+            x=xi, y=yi, z=Z,
+            contours=dict(
+                coloring="none",
+                showlines=True,
+                start=level,
+                end=level,
+                size=1e-6,  # single level
+            ),
+            line=dict(color="#ffd000", width=2.5),
+            showscale=False,
+            hoverinfo="skip",
+            name=f"{level} t line"
         ))
 
     fig.update_layout(
@@ -140,7 +142,6 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
     )
 
     return fig
-
 
 layout = html.Div(
     [
@@ -163,11 +164,9 @@ layout = html.Div(
         ),
 
         dcc.Graph(id="harbour-cdyn115-contours"),
-
         _legend_card(),
     ]
 )
-
 
 @callback(
     Output("harbour-cdyn115-contours", "figure"),
