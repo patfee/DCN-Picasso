@@ -1,111 +1,109 @@
 import os
-from flask import Flask
-from dash import Dash, html, dcc, Input, Output
+from dash import Dash, html, dcc, Input, Output, callback, no_update
 import dash_bootstrap_components as dbc
 
 # Import page modules
 from pages import page1, page2, page3
 
-
-# ----------------------------------------------------------------------
-# Flask + Dash setup
-# ----------------------------------------------------------------------
-server = Flask(__name__)
+# -----------------------------------------------------------------------------
+# App / Server
+# -----------------------------------------------------------------------------
+external_stylesheets = [dbc.themes.BOOTSTRAP]
 app = Dash(
     __name__,
-    server=server,
-    suppress_callback_exceptions=True,
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="DCN Picasso Engineering Data"
+    external_stylesheets=external_stylesheets,
+    suppress_callback_exceptions=True,   # allow callbacks defined in submodules
+    title="Crane Portal",
 )
+server = app.server  # for gunicorn
 
+# -----------------------------------------------------------------------------
+# Global App Config store
+# -----------------------------------------------------------------------------
+# This Store holds the user selections that all pages rely on (interp mode, factors, pedestal, etc.)
+# It should already be read by your page callbacks (id="app-config").
+DEFAULT_CONFIG = {
+    "interp_mode": "linear",       # or "spline"
+    "main_factor": 1,              # 1, 2, 4, 8, 16
+    "folding_factor": 1,           # 1, 2, 4, 8, 16, 32
+    "include_pedestal": False,     # toggle
+    "pedestal_height": 6.0,        # meters
+}
 
-# ----------------------------------------------------------------------
-# Sidebar
-# ----------------------------------------------------------------------
-sidebar = html.Div(
-    [
-        html.H5("Menu"),
-        html.Hr(),
-        dbc.Nav(
+# -----------------------------------------------------------------------------
+# Layout
+# -----------------------------------------------------------------------------
+def navbar():
+    return dbc.Nav(
+        [
+            dbc.NavItem(dbc.NavLink("Page 1", href="/page1", id="link-page1")),
+            dbc.NavItem(dbc.NavLink("Page 2", href="/page2", id="link-page2")),
+            dbc.NavItem(dbc.NavLink("Page 3", href="/page3", id="link-page3")),
+        ],
+        pills=True,
+        className="gap-2",
+    )
+
+app.layout = dbc.Container(
+    fluid=True,
+    children=[
+        dcc.Location(id="url"),
+        dcc.Store(id="app-config", data=DEFAULT_CONFIG, storage_type="memory"),
+        # Top bar
+        dbc.Row(
             [
-                dbc.NavLink("Page 1", href="/page1", active="exact"),
-                dbc.NavLink("Page 2", href="/page2", active="exact"),
-                dbc.NavLink("Page 3", href="/page3", active="exact"),
+                dbc.Col(html.H3("Crane Engineering Portal"), md="auto"),
+                dbc.Col(navbar(), md="auto"),
             ],
-            vertical=True,
-            pills=True,
+            align="center",
+            className="my-3 gy-2",
         ),
-        html.Div("© DCN Diving B.V", className="mt-4 small text-muted"),
-    ],
-    className="bg-light border-end p-3 h-100"
-)
-
-
-# ----------------------------------------------------------------------
-# Main content area
-# ----------------------------------------------------------------------
-content = html.Div(
-    [
-        # Global session-scoped store for pedestal + interpolation settings
-        dcc.Store(
-            id="app-config",
-            storage_type="session",
-            data={
-                "include_pedestal": False,
-                "pedestal_height": 6.0,
-                "main_factor": 1,
-                "folding_factor": 1,
-                "interp_mode": "linear",  # new
-                },
-        ),
-
-        # Header + dynamic page content
+        # Pages are mounted once and then only shown/hidden -> state persists, no redraw
         html.Div(
             [
-                html.H3("My Application 2", className="mb-3"),
-                dcc.Location(id="url"),
-                html.Div(id="page-content"),
+                html.Div(id="page1-container", children=page1.layout, style={"display": "block"}),
+                html.Div(id="page2-container", children=page2.layout, style={"display": "none"}),
+                html.Div(id="page3-container", children=page3.layout, style={"display": "none"}),
             ],
-            className="p-3"
+            id="pages-host",
         ),
     ],
-    className="h-100"
 )
 
-
-# ----------------------------------------------------------------------
-# Overall page layout (sidebar + main area)
-# ----------------------------------------------------------------------
-app.layout = dbc.Container(
-    dbc.Row(
-        [
-            dbc.Col(sidebar, width=2),
-            dbc.Col(content, width=10),
-        ],
-        className="vh-100 g-0"
-    ),
-    fluid=True
+# -----------------------------------------------------------------------------
+# Routing: show/hide pages without destroying them (keeps figures & tables as-is)
+# -----------------------------------------------------------------------------
+@callback(
+    Output("page1-container", "style"),
+    Output("page2-container", "style"),
+    Output("page3-container", "style"),
+    Output("link-page1", "active"),
+    Output("link-page2", "active"),
+    Output("link-page3", "active"),
+    Input("url", "pathname"),
 )
+def route(pathname):
+    # default route
+    if pathname in (None, "/", ""):
+        pathname = "/page1"
 
+    show = {"display": "block"}
+    hide = {"display": "none"}
 
-# ----------------------------------------------------------------------
-# Routing between main pages
-# ----------------------------------------------------------------------
-@app.callback(Output("page-content", "children"), Input("url", "pathname"))
-def render_page_content(pathname):
-    if pathname in ("/", "/page1"):
-        return page1.layout
-    if pathname == "/page2":
-        return page2.layout
-    if pathname == "/page3":
-        return page3.layout
-    return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
+    if pathname.startswith("/page1"):
+        return show, hide, hide, True, False, False
+    if pathname.startswith("/page2"):
+        return hide, show, hide, False, True, False
+    if pathname.startswith("/page3"):
+        return hide, hide, show, False, False, True
 
+    # fallback
+    return show, hide, hide, True, False, False
 
-# ----------------------------------------------------------------------
-# Run locally on port 3000
-# ----------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Entry
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "3000"))
-    app.run_server(host="0.0.0.0", port=port, debug=True)
+    # Respect your local Coolify port 3000
+    port = int(os.environ.get("PORT", "3000"))
+    app.run_server(host="0.0.0.0", port=port, debug=False)
