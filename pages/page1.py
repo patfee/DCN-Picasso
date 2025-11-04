@@ -1,25 +1,32 @@
-import dash
-from dash import html, dcc, Output, Input
-from subpages.page1_tab_a import layout as tab_a_layout
-from subpages.page1_tab_b import layout as tab_b_layout
+from dash import html, dcc
+import dash_bootstrap_components as dbc
+from subpages import page1_tab_a, page1_tab_b
 
-dash.register_page(__name__, path="/page-1", name="Page 1", title="Page 1")
-
-tabs = dcc.Tabs(
-    id="page1-tabs",
-    value="tab-a",
-    children=[
-        dcc.Tab(label="Sub A", value="tab-a"),
-        dcc.Tab(label="Sub B", value="tab-b"),
-    ],
+layout = html.Div(
+    [
+        html.H3("Page 1"),
+        dcc.Tabs(
+            id="tabs-page1",
+            value="tab-a",
+            children=[
+                dcc.Tab(label="Sub A", value="tab-a"),
+                dcc.Tab(label="Sub B", value="tab-b"),
+            ],
+        ),
+        html.Div(id="tabs-content-page1")
+    ]
 )
 
-layout = html.Div(className="page-wrap", children=[
-    html.H2("Page 1"),
-    tabs,
-    html.Div(id="page1-tab-content")
-])
+from dash import Input, Output
+from app import app
 
-@dash.callback(Output("page1-tab-content", "children"), Input("page1-tabs", "value"))
-def _render_page1_tab(tab_value):
-    return tab_a_layout if tab_value == "tab-a" else tab_b_layout
+@app.callback(
+    Output("tabs-content-page1", "children"),
+    Input("tabs-page1", "value")
+)
+def render_tab(tab):
+    if tab == "tab-a":
+        return page1_tab_a.layout
+    elif tab == "tab-b":
+        return page1_tab_b.layout
+    return html.Div("Select a tab")
