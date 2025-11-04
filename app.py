@@ -54,4 +54,4 @@ def render_page_content(pathname):
         return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
 
 if __name__ == "__main__":
-    app.run_server(host="0.0.0.0", port=8050, debug=True)
+    app.run_server(host="0.0.0.0", port=3000, debug=True)
