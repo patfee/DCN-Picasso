@@ -18,7 +18,7 @@ VALUE_LABEL = "Capacity [t]"
 # Band edges (t) – matches the manual: 0–35–70–105–140
 ISO_LEVELS = [0, 35, 70, 105, 140]
 
-# Colors roughly inspired by your image
+# Colors roughly inspired by the manual
 COLORSCALE = [
     [0.00, "#003b46"],  # deep teal
     [0.20, "#00b3c6"],  # cyan
@@ -40,28 +40,33 @@ def _legend_card() -> dbc.Card:
             html.Div(
                 className="d-flex align-items-center mb-1",
                 children=[
-                    html.Div(style={
-                        "width": "16px", "height": "16px",
-                        "backgroundColor": color,
-                        "border": "1px solid rgba(0,0,0,0.2)",
-                        "marginRight": "8px", "borderRadius": "3px"
-                    }),
+                    html.Div(
+                        style={
+                            "width": "16px",
+                            "height": "16px",
+                            "backgroundColor": color,
+                            "border": "1px solid rgba(0,0,0,0.2)",
+                            "marginRight": "8px",
+                            "borderRadius": "3px",
+                        }
+                    ),
                     html.Span(f"{lo:g} – {hi:g} t"),
                 ],
             )
         )
-    )
     return dbc.Card(
         dbc.CardBody(
             [
                 html.Div("Iso-capacity bands (Cdyn 1.15)", className="fw-semibold mb-2"),
                 *rows,
-                html.Div(className="text-muted small mt-2",
-                         children="Bands follow your Page 1 interpolation & subdivisions."),
+                html.Div(
+                    "Bands follow your Page 1 interpolation & subdivisions.",
+                    className="text-muted small mt-2",
+                ),
             ]
         ),
         className="mt-3",
-        style={"maxWidth": "260px"}
+        style={"maxWidth": "260px"},
     )
 
 
@@ -88,57 +93,73 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
     band_step = ISO_LEVELS[1] - ISO_LEVELS[0] if len(ISO_LEVELS) > 1 else 35
     fig = go.Figure()
 
-    fig.add_trace(go.Contour(
-        x=xi, y=yi, z=Z,
-        contours=dict(
-            coloring="fill",
-            showlines=True,
-            start=min(ISO_LEVELS),
-            end=max(ISO_LEVELS),
-            size=band_step,
-        ),
-        colorscale=COLORSCALE,
-        colorbar=dict(title=VALUE_LABEL, tickvals=ISO_LEVELS),
-        line=dict(width=1, color="rgba(0,0,0,0.7)"),
-        hovertemplate=("Outreach: %{x:.2f} m<br>"
-                       "Height: %{y:.2f} m<br>"
-                       f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"),
-        showscale=True,
-        # (No zsmooth here; Contour doesn't support it)
-    ))
+    fig.add_trace(
+        go.Contour(
+            x=xi,
+            y=yi,
+            z=Z,
+            contours=dict(
+                coloring="fill",
+                showlines=True,
+                start=min(ISO_LEVELS),
+                end=max(ISO_LEVELS),
+                size=band_step,
+            ),
+            colorscale=COLORSCALE,
+            colorbar=dict(title=VALUE_LABEL, tickvals=ISO_LEVELS),
+            line=dict(width=1, color="rgba(0,0,0,0.7)"),
+            hovertemplate=(
+                "Outreach: %{x:.2f} m<br>"
+                "Height: %{y:.2f} m<br>"
+                f"{VALUE_LABEL}: %{{z:.1f}}<extra></extra>"
+            ),
+            showscale=True,
+        )
+    )
 
     if show_samples:
-        fig.add_trace(go.Scattergl(
-            x=x, y=y, mode="markers",
-            marker=dict(size=3, opacity=0.28),
-            name="Samples",
-            hoverinfo="skip",
-        ))
+        fig.add_trace(
+            go.Scattergl(
+                x=x,
+                y=y,
+                mode="markers",
+                marker=dict(size=3, opacity=0.28),
+                name="Samples",
+                hoverinfo="skip",
+            )
+        )
 
-    # Emphasize 70 t & 105 t isolines (like the manual’s yellow outline)
+    # Emphasize key iso-lines (e.g., 70 t & 105 t) like the manual’s yellow outline
     for level in (70, 105):
-        fig.add_trace(go.Contour(
-            x=xi, y=yi, z=Z,
-            contours=dict(
-                coloring="none",
-                showlines=True,
-                start=level,
-                end=level,
-                size=1e-6,
-            ),
-            line=dict(color="#ffd000", width=2.5),
-            showscale=False,
-            hoverinfo="skip",
-            name=f"{level} t line"
-        ))
+        fig.add_trace(
+            go.Contour(
+                x=xi,
+                y=yi,
+                z=Z,
+                contours=dict(
+                    coloring="none",
+                    showlines=True,
+                    start=level,
+                    end=level,
+                    size=1e-6,  # single level
+                ),
+                line=dict(color="#ffd000", width=2.5),
+                showscale=False,
+                hoverinfo="skip",
+                name=f"{level} t line",
+            )
+        )
 
     fig.update_layout(
         title="Harbour lift — Cdyn = 1.15 (iso-capacity hulls)",
         xaxis_title="Outreach [m]",
-        yaxis_title=("Jib head above deck level [m]" if include_pedestal
-                     else "Jib head above pedestal flange [m]"),
+        yaxis_title=(
+            "Jib head above deck level [m]" if include_pedestal
+            else "Jib head above pedestal flange [m]"
+        ),
         template="plotly_white",
-        height=760, margin=dict(l=40, r=20, t=60, b=40),
+        height=760,
+        margin=dict(l=40, r=20, t=60, b=40),
     )
 
     return fig
@@ -147,23 +168,24 @@ def _build_contour_figure(df: pd.DataFrame, include_pedestal: bool, show_samples
 layout = html.Div(
     [
         html.H5("Page 2 – Sub B: Harbour lift (iso-capacity hulls)"),
-        html.Div("Aligned with Page 1 settings (linear/spline, subdivisions, pedestal).",
-                 className="mb-2 small text-muted"),
-
+        html.Div(
+            "Aligned with Page 1 settings (linear/spline, subdivisions, pedestal).",
+            className="mb-2 small text-muted",
+        ),
         dbc.Row(
             [
                 dbc.Col(
                     dbc.Checklist(
                         id="tabb-show-samples",
                         options=[{"label": "Show sample points overlay", "value": "on"}],
-                        value=["on"], switch=True,
+                        value=["on"],
+                        switch=True,
                     ),
                     md="auto",
                 ),
             ],
             className="mb-2",
         ),
-
         dcc.Graph(id="harbour-cdyn115-contours"),
         _legend_card(),
     ]
@@ -177,7 +199,7 @@ layout = html.Div(
 )
 def update_iso_hulls(config, show_samples_value):
     include = bool(config.get("include_pedestal", False)) if config else False
-    mode    = (config.get("interp_mode") or "linear").lower() if config else "linear"
+    mode = (config.get("interp_mode") or "linear").lower() if config else "linear"
     if mode not in {"linear", "spline"}:
         mode = "linear"
 
@@ -186,7 +208,7 @@ def update_iso_hulls(config, show_samples_value):
 
     # 2) Interpolate Harbour capacity to the same angle grid, then flatten to XY+value
     V_orig = load_value_grid(VALUE_FILE, data_dir="data")
-    Vgrid  = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
+    Vgrid = interpolate_value_grid(V_orig, new_main, new_fold, mode=mode)
     df = flatten_with_values(Xgrid, Ygrid, Vgrid, value_name=VALUE_LABEL)
 
     show_samples = "on" in (show_samples_value or [])
