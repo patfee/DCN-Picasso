@@ -1,18 +1,25 @@
+import os
+from flask import Flask
 from dash import Dash, html, dcc
 import dash_bootstrap_components as dbc
-from flask import Flask
 
-# Local imports
+# Import page modules
 from pages import page1, page2, page3
 
-# Create Flask + Dash
+# Flask + Dash
 server = Flask(__name__)
-app = Dash(__name__, server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(
+    __name__,
+    server=server,
+    suppress_callback_exceptions=True,
+    external_stylesheets=[dbc.themes.BOOTSTRAP],
+    title="My Application 2"
+)
 
-# Sidebar
+# Sidebar (left) + simple header look
 sidebar = html.Div(
     [
-        html.H2("Menu"),
+        html.H5("Menu"),
         html.Hr(),
         dbc.Nav(
             [
@@ -23,35 +30,49 @@ sidebar = html.Div(
             vertical=True,
             pills=True,
         ),
-        html.Div("© Your Company", className="mt-auto small text-muted text-center")
+        html.Div("© Your Company", className="mt-4 small text-muted"),
     ],
-    className="bg-light sidebar p-3",
+    className="bg-light border-end p-3 h-100"
 )
 
-# Layout
-app.layout = dbc.Container(
+content = html.Div(
     [
-        dbc.Row([
-            dbc.Col(sidebar, width=2),
-            dbc.Col(dcc.Location(id="url"), width=10),
-        ]),
-        dbc.Row(dbc.Col(html.Div(id="page-content"), width=10))
+        html.Div(
+            [
+                html.H3("My Application 2", className="mb-3"),
+                dcc.Location(id="url"),
+                html.Div(id="page-content")
+            ],
+            className="p-3"
+        )
     ],
+    className="h-100"
+)
+
+app.layout = dbc.Container(
+    dbc.Row(
+        [
+            dbc.Col(sidebar, width=2),
+            dbc.Col(content, width=10),
+        ],
+        className="vh-100 g-0"
+    ),
     fluid=True
 )
 
-# Callbacks for routing
+# Simple router
 from dash import Input, Output
 @app.callback(Output("page-content", "children"), Input("url", "pathname"))
 def render_page_content(pathname):
-    if pathname == "/page1":
+    if pathname in ("/", "/page1"):
         return page1.layout
-    elif pathname == "/page2":
+    if pathname == "/page2":
         return page2.layout
-    elif pathname == "/page3":
+    if pathname == "/page3":
         return page3.layout
-    else:
-        return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
+    return html.H1("404 - Page Not Found", className="text-danger text-center mt-5")
 
+# Local run: bind to 0.0.0.0:3000 (or $PORT if provided)
 if __name__ == "__main__":
-    app.run_server(host="0.0.0.0", port=3000, debug=True)
+    port = int(os.getenv("PORT", "3000"))
+    app.run_server(host="0.0.0.0", port=port, debug=True)
