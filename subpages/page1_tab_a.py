@@ -6,20 +6,22 @@ import pandas as pd
 from lib.data_utils import get_crane_points
 
 
-def _format_df_for_view(df: pd.DataFrame, include_pedestal: bool) -> pd.DataFrame:
-    """
-    Return a copy of df with nice column order and rounding for display.
-    """
-    dfv = df.copy()
-    # Order: Outreach, Height, Main, Folding
-    dfv = dfv[["Outreach [m]", "Height [m]", "main_deg", "folding_deg"]]
-    # Round values for display
-    dfv["Outreach [m]"] = dfv["Outreach [m]"].round(2)
-    dfv["Height [m]"] = dfv["Height [m]"].round(2)
-    dfv["main_deg"] = dfv["main_deg"].round(0).astype(int)
-    dfv["folding_deg"] = dfv["folding_deg"].round(0).astype(int)
+MAIN_OPTIONS = [
+    {"label": "1× per-interval (original)", "value": 1},
+    {"label": "2× per-interval",            "value": 2},
+    {"label": "4× per-interval",            "value": 4},
+    {"label": "8× per-interval",            "value": 8},
+    {"label": "16× per-interval",           "value": 16},
+]
+FOLD_OPTIONS = MAIN_OPTIONS + [{"label": "32× per-interval", "value": 32}]
 
-    # Optionally relabel Height column header for the table (keeps data key the same)
+
+def _format_df_for_view(df: pd.DataFrame, include_pedestal: bool) -> pd.DataFrame:
+    dfv = df[["Outreach [m]", "Height [m]", "main_deg", "folding_deg"]].copy()
+    dfv["Outreach [m]"] = dfv["Outreach [m]"].round(2)
+    dfv["Height [m]"]   = dfv["Height [m]"].round(2)
+    dfv["main_deg"]     = dfv["main_deg"].round(2)
+    dfv["folding_deg"]  = dfv["folding_deg"].round(2)
     if include_pedestal:
         dfv = dfv.rename(columns={"Height [m]": "Height [m] (deck level)"})
     else:
@@ -28,12 +30,7 @@ def _format_df_for_view(df: pd.DataFrame, include_pedestal: bool) -> pd.DataFram
 
 
 def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
-    """
-    Build the scatter with rich hover text using angles from the dataset.
-    """
-    # customdata will carry [main_deg, folding_deg] to use in the hovertemplate
     custom = np.stack([df["main_deg"].to_numpy(), df["folding_deg"].to_numpy()], axis=-1)
-
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["Outreach [m]"],
@@ -44,10 +41,9 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
         customdata=custom,
         hovertemplate=(
             "Outreach: %{x:.2f} m — Height: %{y:.2f} m<br>"
-            "Main Jib: %{customdata[0]:.0f}° — Folding Jib: %{customdata[1]:.0f}°"
+            "Main Jib: %{customdata[0]:.2f}° — Folding Jib: %{customdata[1]:.2f}°"
         )
     ))
-
     fig.update_layout(
         title="Tabular data points Main Hoist",
         xaxis_title="Outreach [m]",
@@ -56,7 +52,6 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
         template="plotly_white",
         height=720,
     )
-
     if not df.empty:
         x_min, x_max = df["Outreach [m]"].min(), df["Outreach [m]"].max()
         y_min, y_max = df["Height [m]"].min(),   df["Height [m]"].max()
@@ -64,7 +59,6 @@ def make_figure(df: pd.DataFrame, include_pedestal: bool) -> go.Figure:
         y_pad = max(0.5, 0.03 * (y_max - y_min))
         fig.update_xaxes(range=[x_min - x_pad, x_max + x_pad], zeroline=True)
         fig.update_yaxes(range=[y_min - y_pad, y_max + y_pad], zeroline=True)
-
     return fig
 
 
@@ -72,33 +66,48 @@ layout = html.Div(
     [
         html.H5("Page 1 – Sub A: Height vs Outreach"),
 
-        # Controls
+        # Controls row 1
         dbc.Row(
             [
                 dbc.Col(
-                    dbc.Switch(
-                        id="toggle-pedestal",
-                        label="Add pedestal height",
-                        value=False,  # default off; will sync from store
-                    ),
+                    dbc.Switch(id="toggle-pedestal", label="Add pedestal height", value=False),
                     md=3,
                 ),
                 dbc.Col(
-                    dbc.Input(
-                        id="pedestal-height",
-                        type="number",
-                        value=6.0,   # default; will sync from store
-                        step=0.1,
-                        min=0
-                    ),
+                    dbc.Input(id="pedestal-height", type="number", value=6.0, step=0.1, min=0),
                     md=2,
                 ),
                 dbc.Col(
-                    dbc.Button("Download CSV", id="download-csv-btn", n_clicks=0, color="primary"),
-                    md=2,
+                    dcc.Dropdown(
+                        id="main-factor",
+                        options=MAIN_OPTIONS,
+                        value=1,
+                        clearable=False,
+                    ),
+                    md=3
+                ),
+                dbc.Col(
+                    dcc.Dropdown(
+                        id="folding-factor",
+                        options=FOLD_OPTIONS,
+                        value=1,
+                        clearable=False,
+                    ),
+                    md=3
                 ),
             ],
-            className="g-3 mb-3",
+            className="g-3 mb-2",
+        ),
+
+        # Labels under the dropdowns
+        dbc.Row(
+            [
+                dbc.Col(html.Div(""), md=3),
+                dbc.Col(html.Div(""), md=2),
+                dbc.Col(html.Div("Main-jib subdivision"), md=3),
+                dbc.Col(html.Div("Folding-jib subdivision"), md=3),
+            ],
+            className="mb-3 small text-muted",
         ),
 
         # Graph
@@ -110,64 +119,68 @@ layout = html.Div(
                 html.H6("Height/Outreach data"),
                 dash_table.DataTable(
                     id="crane-table",
-                    columns=[],  # filled dynamically
-                    data=[],     # filled dynamically
+                    columns=[],
+                    data=[],
                     sort_action="native",
                     filter_action="native",
-                    page_size=15,
+                    page_size=20,
                     style_table={"height": "420px", "overflowY": "auto"},
                     style_cell={"padding": "6px", "fontSize": "14px"},
                     style_header={"fontWeight": "600"},
                 ),
+                dbc.Button("Download CSV", id="download-csv-btn", n_clicks=0, color="primary", className="mt-3"),
             ],
             className="mt-3",
         ),
 
-        # Shared store lives in app.py
-        dcc.Store(id="app-config-proxy", storage_type="session"),
-
-        # Download component
         dcc.Download(id="download-csv"),
     ]
 )
 
-# -------- Sync controls from session store on first load
+# ---- Sync controls from session store (first load)
 @callback(
     Output("toggle-pedestal", "value"),
     Output("pedestal-height", "value"),
+    Output("main-factor", "value"),
+    Output("folding-factor", "value"),
     Input("app-config", "data"),
     prevent_initial_call=False
 )
 def sync_controls_from_store(config):
-    include = bool(config.get("include_pedestal", False)) if config else False
+    include  = bool(config.get("include_pedestal", False)) if config else False
     pedestal = float(config.get("pedestal_height", 6.0)) if config else 6.0
-    return include, pedestal
+    main_f   = int(config.get("main_factor", 1)) if config else 1
+    fold_f   = int(config.get("folding_factor", 1)) if config else 1
+    return include, pedestal, main_f, fold_f
 
 
-# -------- Update the shared store when user changes controls
+# ---- Write store when user changes any control
 @callback(
     Output("app-config", "data"),
     Input("toggle-pedestal", "value"),
     Input("pedestal-height", "value"),
+    Input("main-factor", "value"),
+    Input("folding-factor", "value"),
     State("app-config", "data"),
 )
-def write_store(include_pedestal, pedestal_height, current):
+def write_store(include_pedestal, pedestal_height, main_factor, folding_factor, current):
     current = current or {}
     try:
         ph = float(pedestal_height) if pedestal_height is not None else current.get("pedestal_height", 6.0)
-        if not np.isfinite(ph):
-            ph = current.get("pedestal_height", 6.0)
+        if not np.isfinite(ph): ph = current.get("pedestal_height", 6.0)
     except Exception:
         ph = current.get("pedestal_height", 6.0)
 
     current.update({
         "include_pedestal": bool(include_pedestal),
         "pedestal_height": ph,
+        "main_factor": int(main_factor) if main_factor else 1,
+        "folding_factor": int(folding_factor) if folding_factor else 1,
     })
     return current
 
 
-# -------- Build the figure and the table from the effective dataset
+# ---- Build figure + table from effective dataset (includes interpolation)
 @callback(
     Output("crane-graph", "figure"),
     Output("crane-table", "columns"),
@@ -177,19 +190,15 @@ def write_store(include_pedestal, pedestal_height, current):
 def update_outputs_from_store(config):
     df = get_crane_points(config=config, data_dir="data")
     include = bool(config.get("include_pedestal", False)) if config else False
-
-    # Figure
     fig = make_figure(df, include)
 
-    # Table
     df_view = _format_df_for_view(df, include)
     columns = [{"name": c, "id": c} for c in df_view.columns]
     data = df_view.to_dict("records")
-
     return fig, columns, data
 
 
-# -------- Download the currently effective dataset
+# ---- Download current dataset (interpolated + pedestal as configured)
 @callback(
     Output("download-csv", "data"),
     Input("download-csv-btn", "n_clicks"),
@@ -202,7 +211,6 @@ def download_csv(n_clicks, config):
     df = get_crane_points(config=config, data_dir="data")
     include = bool(config.get("include_pedestal", False)) if config else False
     df_out = _format_df_for_view(df, include)
-
-    # Use a stable filename reflecting pedestal choice
-    fname = "crane_points_with_pedestal.csv" if include else "crane_points_without_pedestal.csv"
+    fname = f"crane_points_m{config.get('main_factor',1)}_f{config.get('folding_factor',1)}" \
+            f"{'_with_pedestal' if include else '_without_pedestal'}.csv"
     return dcc.send_data_frame(df_out.to_csv, filename=fname, index=False)
