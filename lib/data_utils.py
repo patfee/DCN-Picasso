@@ -20,16 +20,18 @@ def _read_angle_grid(filename: str, data_dir: str = "data"):
     """
     Reads an angle-grid CSV:
       - first row (from col 2 onward) = main jib angles (deg)
-      - first col (from row 2 downward) = folding jib angles (deg)
+      - first col (ALL data rows)     = folding jib angles (deg)
       - body = numeric values
     Robust to either ';' or ',' as delimiter and to decimal commas.
 
-    Returns:
+    RETURNS:
       main_angles: np.ndarray[float]
       fold_angles: np.ndarray[float]
       body_df:     pd.DataFrame (index = fold_angles, columns = main_angles)
     """
     path = os.path.join(data_dir, filename)
+
+    # Detect separator from file head
     with open(path, "r", encoding="utf-8") as f:
         head = f.read(4096)
     sep = _detect_sep(head)
@@ -37,27 +39,29 @@ def _read_angle_grid(filename: str, data_dir: str = "data"):
     # Read with detected separator
     df_raw = pd.read_csv(path, sep=sep, engine="python")
 
-    if df_raw.shape[0] < 2 or df_raw.shape[1] < 2:
+    if df_raw.shape[0] < 1 or df_raw.shape[1] < 2:
         raise ValueError(f"{filename}: not a 2D angle grid (shape={df_raw.shape}).")
 
-    # Parse header (main angles) — convert decimal commas to dots
+    # Header (main angles): columns 1..end (convert decimal commas to dots)
     main_headers = [str(c).strip().replace(",", ".") for c in df_raw.columns[1:]]
     try:
         main_angles = np.array([float(x) for x in main_headers], dtype=float)
     except Exception as e:
         raise ValueError(f"{filename}: failed to parse main-jib angles from header.") from e
 
-    # Parse first column (fold angles) — rows 1:end
-    fold_col = df_raw.iloc[1:, 0].astype(str).str.strip().str.replace(",", ".", regex=False)
+    # FIRST DATA COLUMN (fold angles): **all data rows**, do NOT skip the first row.
+    # Pandas has already consumed the header line, so row 0 is the first fold angle (e.g., 0.00).
+    fold_col = df_raw.iloc[:, 0].astype(str).str.strip().str.replace(",", ".", regex=False)
     try:
         fold_angles = np.array(fold_col.astype(float).to_list(), dtype=float)
     except Exception as e:
         raise ValueError(f"{filename}: failed to parse folding-jib angles from first column.") from e
 
-    # Convert body to numeric (coerce irregulars to NaN), then fill gently
-    body_str = df_raw.iloc[1:, 1:].astype(str).replace({",": "."}, regex=True)
+    # BODY: **all data rows**, columns 1..end (do NOT skip the first row)
+    body_str = df_raw.iloc[:, 1:].astype(str).replace({",": "."}, regex=True)
     body = body_str.apply(lambda s: pd.to_numeric(s, errors="coerce"))
 
+    # Index/columns
     body.index = fold_angles
     body.columns = main_angles
 
@@ -161,7 +165,7 @@ def load_crane_data(data_dir: str = "data",
                     height_file: str = "height.csv"):
     """
     Loads the crane outreach and height matrices from CSVs.
-    Returns:
+    RETURNS:
       main_angles (deg), fold_angles (deg), outreach_df, height_df
     """
     main_angles, fold_angles, outreach_data = _read_angle_grid(outreach_file, data_dir)
