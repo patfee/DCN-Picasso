@@ -1,4 +1,5 @@
-from dash import html, dcc, callback, Input, Output
+from app_instance import app
+from dash import html, dcc,  Input, Output
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 import numpy as np
@@ -253,7 +254,7 @@ layout = html.Div(
 
 # ------------------------------ Callback ------------------------------
 
-@callback(
+@app.callback(
     Output("harbour-cdyn115-contours-tabc", "figure"),
     Input("app-config", "data"),
     Input("tabc-show-samples", "value"),

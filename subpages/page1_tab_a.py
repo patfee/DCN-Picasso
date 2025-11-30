@@ -1,9 +1,10 @@
-from dash import html, dcc, callback, Input, Output, State, dash_table
+from dash import html, dcc, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 import numpy as np
 import pandas as pd
 from lib.data_utils import get_crane_points
+from app_instance import app
 
 
 # ----------------------------------------------------------------------
@@ -134,7 +135,7 @@ layout = html.Div(
 # ----------------------------------------------------------------------
 # Callbacks
 # ----------------------------------------------------------------------
-@callback(
+@app.callback(
     Output("toggle-pedestal", "value"),
     Output("pedestal-height", "value"),
     Output("main-factor", "value"),
@@ -154,7 +155,7 @@ def sync_controls_from_store(config):
     return include, pedestal, main_f, fold_f, mode
 
 
-@callback(
+@app.callback(
     Output("app-config", "data"),
     Input("toggle-pedestal", "value"),
     Input("pedestal-height", "value"),
@@ -187,7 +188,7 @@ def write_store(include_pedestal, pedestal_height, main_factor, folding_factor, 
     return current
 
 
-@callback(
+@app.callback(
     Output("crane-graph", "figure"),
     Output("crane-table", "columns"),
     Output("crane-table", "data"),
@@ -206,7 +207,7 @@ def update_outputs_from_store(config):
     return fig, columns, data
 
 
-@callback(
+@app.callback(
     Output("download-csv", "data"),
     Input("download-csv-btn", "n_clicks"),
     State("app-config", "data"),

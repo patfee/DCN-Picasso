@@ -1,4 +1,5 @@
-from dash import html, dcc, callback, Input, Output, State, dash_table
+from app_instance import app
+from dash import html, dcc,  Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 import numpy as np
@@ -111,7 +112,7 @@ layout = html.Div(
 )
 
 
-@callback(
+@app.callback(
     Output("harbour-cdyn115-graph", "figure"),
     Output("harbour-cdyn115-table", "columns"),
     Output("harbour-cdyn115-table", "data"),
@@ -144,7 +145,7 @@ def update_harbour_view(config):
     return fig, columns, data
 
 
-@callback(
+@app.callback(
     Output("harbour-cdyn115-download", "data"),
     Input("harbour-cdyn115-download-btn", "n_clicks"),
     State("app-config", "data"),

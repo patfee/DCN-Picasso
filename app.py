@@ -1,22 +1,23 @@
 import os
-from flask import Flask
-from dash import Dash, html, dcc, Input, Output
+from dash import html, dcc, Input, Output
 import dash_bootstrap_components as dbc
+
+# Import the shared app instance (must be first!)
+from app_instance import app, server
 
 # Import page modules
 from pages import page1, page2, page3
 
-
-# ----------------------------------------------------------------------
-# Flask + Dash setup
-# ----------------------------------------------------------------------
-server = Flask(__name__)
-app = Dash(
-    __name__,
-    server=server,
-    suppress_callback_exceptions=True,
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="DCN Picasso Engineering Data"
+# Import subpage modules to register their callbacks
+# This must happen after app_instance is imported
+from subpages import (
+    page1_tab_a,
+    page1_tab_b,
+    page2_tab_a,
+    page2_tab_b,
+    page2_tab_c,
+    page3_tab_a,
+    page3_tab_b,
 )
 
 
